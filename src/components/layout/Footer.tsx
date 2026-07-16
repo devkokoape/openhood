@@ -1,43 +1,143 @@
-import { Layers } from 'lucide-react'
+import { Layers, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { OPENSEA_DOCS } from '../../lib/opensea'
+import { MARKETPLACE_EXPLORER } from '../../lib/marketplace'
+
+const product = [
+  { to: '/', label: 'Discover' },
+  { to: '/collections', label: 'Collections' },
+  { to: '/rankings', label: 'Rankings' },
+  { to: '/activity', label: 'Activity' },
+]
+
+const trade = [
+  { to: '/degen', label: 'Degen Mode' },
+  { to: '/degen/mints', label: 'Mint pages' },
+  { to: '/degen/bulk', label: 'Bulk buy' },
+  { to: '/profile', label: 'Profile' },
+]
+
+const resources = [
+  {
+    href: OPENSEA_DOCS.robinhoodChain,
+    label: 'OpenSea · Robinhood',
+  },
+  {
+    href: MARKETPLACE_EXPLORER,
+    label: 'Block explorer',
+  },
+  {
+    href: 'https://docs.robinhood.com/chain',
+    label: 'Robinhood Chain docs',
+  },
+  {
+    href: 'https://github.com/devkokoape/openhood',
+    label: 'GitHub',
+  },
+]
 
 export function Footer() {
   return (
-    <footer className="border-t border-edge mt-auto bg-surface-2 pb-safe">
-      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 sm:py-8 flex flex-col md:flex-row gap-5 md:items-center md:justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-md bg-hood flex items-center justify-center shrink-0">
-            <Layers className="w-3.5 h-3.5 text-[#0b0e11]" />
-          </div>
-          <div className="min-w-0">
-            <div className="font-bold text-ink">
-              Open<span className="text-hood">Hood</span>
+    <footer className="mt-auto border-t border-edge bg-surface-2 pb-safe">
+      {/* Top brand strip */}
+      <div className="border-b border-edge">
+        <div className="mx-auto max-w-[1920px] px-3 sm:px-4 lg:px-6 py-8 sm:py-10">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-12 gap-8 lg:gap-6">
+            {/* Brand */}
+            <div className="col-span-2 sm:col-span-4 lg:col-span-4">
+              <Link to="/" className="inline-flex items-center gap-2.5 group">
+                <div className="w-9 h-9 rounded-xl bg-hood flex items-center justify-center shadow-md shadow-hood/20">
+                  <Layers className="w-4 h-4 text-[#0b0e11]" strokeWidth={2.5} />
+                </div>
+                <div>
+                  <div className="font-extrabold text-lg tracking-tight text-ink group-hover:text-hood transition-colors">
+                    Open<span className="text-hood">Hood</span>
+                  </div>
+                  <div className="text-[11px] text-ink-3 font-medium">
+                    NFT marketplace · Robinhood Chain
+                  </div>
+                </div>
+              </Link>
+              <p className="mt-4 text-sm text-ink-2 leading-relaxed max-w-sm">
+                Trade Robinhood Chain NFTs with live OpenSea analytics. Mint, list, and auction
+                on the OpenHood testnet marketplace.
+              </p>
+              <div className="mt-4 inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-edge bg-surface text-[11px] font-semibold text-ink-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-hood" />
+                Powered by OpenSea + Robinhood Chain
+              </div>
             </div>
-            <p className="text-xs text-ink-3">NFT marketplace on Robinhood Chain</p>
+
+            {/* Product */}
+            <div className="lg:col-span-2">
+              <h3 className="text-[11px] font-bold uppercase tracking-wider text-ink-3 mb-3">
+                Marketplace
+              </h3>
+              <ul className="space-y-2">
+                {product.map((l) => (
+                  <li key={l.to}>
+                    <Link
+                      to={l.to}
+                      className="text-sm text-ink-2 hover:text-hood transition-colors"
+                    >
+                      {l.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Trade */}
+            <div className="lg:col-span-2">
+              <h3 className="text-[11px] font-bold uppercase tracking-wider text-ink-3 mb-3">
+                Trade
+              </h3>
+              <ul className="space-y-2">
+                {trade.map((l) => (
+                  <li key={l.to}>
+                    <Link
+                      to={l.to}
+                      className="text-sm text-ink-2 hover:text-hood transition-colors"
+                    >
+                      {l.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Resources */}
+            <div className="col-span-2 sm:col-span-2 lg:col-span-4">
+              <h3 className="text-[11px] font-bold uppercase tracking-wider text-ink-3 mb-3">
+                Resources
+              </h3>
+              <ul className="space-y-2">
+                {resources.map((l) => (
+                  <li key={l.href}>
+                    <a
+                      href={l.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm text-ink-2 hover:text-hood transition-colors"
+                    >
+                      {l.label}
+                      <ExternalLink className="w-3 h-3 opacity-50" />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-ink-2">
-          <Link to="/" className="hover:text-hood py-1">
-            Discover
-          </Link>
-          <Link to="/collections" className="hover:text-hood py-1">
-            Collections
-          </Link>
-          <Link to="/rankings" className="hover:text-hood py-1">
-            Rankings
-          </Link>
-          <Link to="/degen" className="hover:text-hood py-1">
-            Degen
-          </Link>
-          <Link to="/activity" className="hover:text-hood py-1">
-            Activity
-          </Link>
-          <Link to="/profile" className="hover:text-hood py-1">
-            Profile
-          </Link>
-        </div>
-        <p className="text-xs text-ink-3">
-          Live OpenSea · Robinhood Chain · OpenHood testnet market
+      </div>
+
+      {/* Bottom bar */}
+      <div className="mx-auto max-w-[1920px] px-3 sm:px-4 lg:px-6 py-4 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+        <p className="text-[11px] sm:text-xs text-ink-3">
+          © {new Date().getFullYear()} OpenHood. Not affiliated with Robinhood Markets, Inc.
+        </p>
+        <p className="text-[11px] sm:text-xs text-ink-3">
+          Stats via OpenSea API · Testnet marketplace for demo purposes
         </p>
       </div>
     </footer>

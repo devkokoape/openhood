@@ -13,7 +13,6 @@ import {
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../../context/ThemeContext'
-import { useMarketplace } from '../../context/MarketplaceContext'
 import { ConnectWallet } from '../wallet/ConnectWallet'
 
 const links = [
@@ -26,18 +25,10 @@ const links = [
 
 export function Navbar() {
   const { theme, toggle } = useTheme()
-  const { openSeaStatus } = useMarketplace()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
-  const [now, setNow] = useState(() => Date.now())
   const navigate = useNavigate()
 
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-
-  // Lock body scroll when mobile menu open
   useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
@@ -55,14 +46,9 @@ export function Navbar() {
     }
   }
 
-  const liveAge =
-    openSeaStatus.lastOkAt != null
-      ? Math.max(0, Math.round((now - openSeaStatus.lastOkAt) / 1000))
-      : null
-
   return (
     <header className="sticky top-0 z-40 border-b border-edge bg-surface/90 backdrop-blur-xl pt-safe">
-      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 h-14 flex items-center gap-2 sm:gap-3 min-w-0">
+      <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 h-14 flex items-center gap-2 sm:gap-3 min-w-0">
         <Link to="/" className="flex items-center gap-1.5 sm:gap-2 shrink-0 group min-w-0">
           <div className="w-8 h-8 sm:w-7 sm:h-7 rounded-lg bg-hood flex items-center justify-center shadow-sm shadow-hood/30 shrink-0">
             <Layers className="w-3.5 h-3.5 text-[#0b0e11]" strokeWidth={2.5} />
@@ -71,42 +57,6 @@ export function Navbar() {
             Open<span className="text-hood">Hood</span>
           </span>
         </Link>
-
-        {/* Live pulse — compact on tablet+ */}
-        <div
-          className={clsx(
-            'hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border shrink-0',
-            openSeaStatus.live
-              ? 'border-hood/40 bg-hood-muted text-hood'
-              : 'border-edge bg-surface-2 text-ink-3'
-          )}
-          title={
-            openSeaStatus.lastError ||
-            (openSeaStatus.live
-              ? 'OpenSea Robinhood stats refreshing every 1s'
-              : 'Waiting for OpenSea live data')
-          }
-        >
-          <span
-            className={clsx(
-              'w-1.5 h-1.5 rounded-full shrink-0',
-              openSeaStatus.live
-                ? 'bg-hood animate-pulse'
-                : openSeaStatus.refreshing
-                  ? 'bg-amber-400 animate-pulse'
-                  : 'bg-ink-3'
-            )}
-          />
-          <span className="whitespace-nowrap">
-            {openSeaStatus.live
-              ? liveAge != null && liveAge < 3
-                ? 'Live'
-                : `${liveAge ?? '—'}s`
-              : openSeaStatus.refreshing
-                ? '…'
-                : 'Offline'}
-          </span>
-        </div>
 
         <nav className="hidden md:flex items-center gap-0.5 ml-1 min-w-0">
           {links.map((l) => (
@@ -136,7 +86,7 @@ export function Navbar() {
           ))}
         </nav>
 
-        <form onSubmit={onSearch} className="hidden lg:flex flex-1 max-w-sm ml-2 min-w-0">
+        <form onSubmit={onSearch} className="hidden lg:flex flex-1 max-w-md ml-2 min-w-0">
           <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3 pointer-events-none" />
             <input
@@ -158,7 +108,6 @@ export function Navbar() {
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          {/* Connect always visible — was sm:block only and broke mobile wallet */}
           <div className="max-w-[9.5rem] sm:max-w-none">
             <ConnectWallet compact />
           </div>
@@ -183,7 +132,6 @@ export function Navbar() {
         </div>
       </div>
 
-      {/* Mobile drawer */}
       {open && (
         <>
           <div
@@ -205,21 +153,6 @@ export function Navbar() {
                   />
                 </div>
               </form>
-
-              <div
-                className={clsx(
-                  'flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold mb-1',
-                  openSeaStatus.live ? 'bg-hood-muted text-hood' : 'bg-surface-2 text-ink-3'
-                )}
-              >
-                <span
-                  className={clsx(
-                    'w-1.5 h-1.5 rounded-full',
-                    openSeaStatus.live ? 'bg-hood animate-pulse' : 'bg-ink-3'
-                  )}
-                />
-                {openSeaStatus.live ? 'OpenSea live data' : 'OpenSea syncing / offline'}
-              </div>
 
               {links.map((l) => {
                 const Icon = l.icon

@@ -18,7 +18,7 @@ export function FeaturedCollectionCard({ collection, rank, className }: Props) {
     <Link
       to={`/collection/${collection.slug}`}
       className={clsx(
-        'group relative flex flex-col shrink-0 w-[260px] sm:w-[280px] rounded-2xl border border-edge bg-surface overflow-hidden',
+        'group relative flex flex-col shrink-0 w-[min(72vw,240px)] sm:w-[260px] lg:w-[272px] rounded-2xl border border-edge bg-surface overflow-hidden',
         'transition-all duration-300 hover:-translate-y-1 hover:border-hood/50 hover:shadow-[0_12px_40px_rgba(0,200,5,0.12)]',
         className
       )}
