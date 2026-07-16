@@ -30,7 +30,7 @@ export function DegenShell() {
     <div className="animate-fade-in">
       <div className="border-b border-edge bg-surface-2 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-hood/15 via-transparent to-[rgba(255,80,0,0.08)] pointer-events-none" />
-        <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-5 relative">
+        <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-5 relative">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="w-11 h-11 rounded-xl bg-hood flex items-center justify-center shrink-0 shadow-lg shadow-hood/25">

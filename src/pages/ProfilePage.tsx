@@ -92,7 +92,7 @@ export function ProfilePage() {
   }, 0)
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 animate-fade-in">
+    <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-6 animate-fade-in">
       <div className="rounded-2xl border border-edge bg-surface-2 p-6 md:p-8 flex flex-col sm:flex-row gap-5 items-start">
         <div className="w-20 h-20 rounded-2xl bg-hood overflow-hidden shrink-0">
           {profile.avatar ? (

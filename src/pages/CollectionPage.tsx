@@ -350,7 +350,7 @@ export function CollectionPage() {
 
   if (!collection) {
     return (
-      <div className="mx-auto max-w-[1600px] px-4 py-20 text-center">
+      <div className="mx-auto max-w-[1920px] px-4 py-20 text-center">
         <p className="text-ink-2">Collection not found.</p>
         <Link to="/" className="text-hood text-sm mt-2 inline-block">
           Back to explore
@@ -440,7 +440,7 @@ export function CollectionPage() {
       </div>
 
       {/* —— Header block —— */}
-      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6">
+      <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4">
         {/* Avatar + actions row */}
         <div
           className={clsx(
@@ -668,7 +668,7 @@ export function CollectionPage() {
 
       {/* —— Sticky tabs (OpenSea style) —— */}
       <div className="sticky sticky-under-nav z-30 mt-5 sm:mt-6 border-b border-edge bg-surface/95 backdrop-blur-xl">
-        <div className="mx-auto max-w-[1600px] px-2 sm:px-4 lg:px-6 flex items-center gap-0.5 overflow-x-auto hide-scrollbar scroll-x">
+        <div className="mx-auto max-w-[1920px] px-2 sm:px-4 lg:px-6 flex items-center gap-0.5 overflow-x-auto hide-scrollbar scroll-x">
           {mainTabs.map((t) => {
             const count =
               t.id === 'items'
@@ -706,7 +706,7 @@ export function CollectionPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6 py-4 pb-12">
+      <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-4 pb-12">
         {/* —— ITEMS —— */}
         {tab === 'items' && (
           <div>
@@ -1169,7 +1169,7 @@ export function CollectionPage() {
       {/* Sticky sweep cart */}
       {sweepMode && selected.size > 0 && (
         <div className="fixed bottom-0 inset-x-0 z-40 border-t border-edge bg-surface/95 backdrop-blur-xl shadow-[0_-8px_30px_rgba(0,0,0,0.15)] pb-safe">
-          <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
             <div className="flex-1 min-w-0 flex items-center gap-3">
               <div className="flex -space-x-2">
                 {selectedNfts.slice(0, 4).map((n) => (

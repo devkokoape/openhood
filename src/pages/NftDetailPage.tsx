@@ -121,7 +121,7 @@ export function NftDetailPage() {
 
   if (!nft || !collection) {
     return (
-      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-20 text-center text-ink-2">
+      <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-20 text-center text-ink-2">
         NFT not found.{' '}
         <Link to="/" className="text-hood">
           Explore
@@ -232,7 +232,7 @@ export function NftDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-4 sm:py-6 animate-fade-in overflow-x-hidden">
+    <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-4 sm:py-6 animate-fade-in overflow-x-hidden">
       {toast && (
         <TxToast
           message={toast.msg}

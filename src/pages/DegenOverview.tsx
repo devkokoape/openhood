@@ -12,7 +12,7 @@ export function DegenOverview() {
   const listed = nfts.filter((n) => n.listed).length
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 space-y-8">
+    <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-6 space-y-8">
       {/* Quick actions */}
       <div className="grid sm:grid-cols-2 gap-3">
         <Link

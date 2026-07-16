@@ -41,7 +41,7 @@ export function Footer() {
     <footer className="mt-auto border-t border-edge bg-surface-2 pb-safe">
       {/* Top brand strip */}
       <div className="border-b border-edge">
-        <div className="mx-auto max-w-[1920px] px-3 sm:px-4 lg:px-6 py-8 sm:py-10">
+        <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-8 sm:py-10">
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-12 gap-8 lg:gap-6">
             {/* Brand */}
             <div className="col-span-2 sm:col-span-4 lg:col-span-4">
@@ -132,7 +132,7 @@ export function Footer() {
       </div>
 
       {/* Bottom bar */}
-      <div className="mx-auto max-w-[1920px] px-3 sm:px-4 lg:px-6 py-4 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+      <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-4 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
         <p className="text-[11px] sm:text-xs text-ink-3">
           © {new Date().getFullYear()} OpenHood. Not affiliated with Robinhood Markets, Inc.
         </p>

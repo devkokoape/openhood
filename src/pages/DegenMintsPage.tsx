@@ -43,7 +43,7 @@ export function DegenMintsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6">
+    <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-6">
       <div className="mb-4">
         <h2 className="text-xl font-bold text-ink">Mint pages</h2>
         <p className="text-sm text-ink-2 mt-0.5">

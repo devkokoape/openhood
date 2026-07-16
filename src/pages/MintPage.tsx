@@ -36,7 +36,7 @@ export function MintPage() {
 
   if (!drop) {
     return (
-      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-16 text-center">
+      <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-16 text-center">
         <p className="text-ink-2">Mint page not found.</p>
         <Link to="/degen/mints" className="text-hood text-sm mt-2 inline-block">
           All mint pages
@@ -104,7 +104,7 @@ export function MintPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 animate-fade-in">
+    <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-6 animate-fade-in">
       {toast && (
         <TxToast
           message={toast.msg}

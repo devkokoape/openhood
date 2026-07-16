@@ -24,7 +24,7 @@ export function ActivityPage() {
   }, [activities, tab])
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 animate-fade-in">
+    <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-6 animate-fade-in">
       <div className="mb-6">
         <h1 className="text-2xl md:text-3xl font-bold text-ink">Activity</h1>
         <p className="text-ink-2 text-sm mt-1">
