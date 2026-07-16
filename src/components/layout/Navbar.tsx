@@ -7,15 +7,13 @@ import {
   Search,
   Sun,
   User,
-  Wallet,
   X,
   Zap,
 } from 'lucide-react'
 import { useState } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../../context/ThemeContext'
-import { useMarketplace } from '../../context/MarketplaceContext'
-import { Button } from '../ui/Button'
+import { ConnectWallet } from '../wallet/ConnectWallet'
 
 const links = [
   { to: '/', label: 'Discover', end: true },
@@ -27,7 +25,6 @@ const links = [
 
 export function Navbar() {
   const { theme, toggle } = useTheme()
-  const { connected, connect, disconnect, user } = useMarketplace()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const navigate = useNavigate()
@@ -91,23 +88,9 @@ export function Navbar() {
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          {connected ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="hidden sm:inline-flex"
-              onClick={() => disconnect()}
-              title="Disconnect"
-            >
-              <Wallet className="w-3.5 h-3.5 text-hood" />
-              <span className="font-mono text-xs">{user}</span>
-            </Button>
-          ) : (
-            <Button size="sm" onClick={connect} className="hidden sm:inline-flex">
-              <Wallet className="w-3.5 h-3.5" />
-              Connect
-            </Button>
-          )}
+          <div className="hidden sm:block">
+            <ConnectWallet compact />
+          </div>
 
           <Link
             to="/profile"
@@ -161,11 +144,9 @@ export function Navbar() {
             <User className="w-4 h-4" />
             Profile
           </Link>
-          {!connected && (
-            <Button fullWidth onClick={connect} className="mt-2">
-              Connect Wallet
-            </Button>
-          )}
+          <div className="pt-2" onClick={() => setOpen(false)}>
+            <ConnectWallet className="w-full" />
+          </div>
         </div>
       )}
     </header>

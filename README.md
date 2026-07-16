@@ -35,7 +35,19 @@ Chain browse: https://opensea.io/collections/chain/robinhood
 - React + TypeScript + Vite
 - Tailwind CSS v4
 - React Router
-- Mock on-chain data (ready to wire to Robinhood Chain / contracts later)
+- **wagmi + viem** wallet connect (Robinhood Chain `4663`)
+- OpenSea stats snapshot + mock marketplace actions
+
+## Wallet connect
+
+Navbar **Connect** opens a modal:
+
+- MetaMask / browser injected wallets  
+- Coinbase Wallet  
+- WalletConnect (if `VITE_WALLETCONNECT_PROJECT_ID` is set)  
+
+Network: **Robinhood Chain** (chain ID `4663`, RPC `https://rpc.mainnet.chain.robinhood.com`).  
+If the wallet is on another chain, the UI prompts **Switch to Robinhood**.
 
 ## Run
 

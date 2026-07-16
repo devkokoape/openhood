@@ -6,13 +6,14 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useAccount } from 'wagmi'
 import type { Activity, Collection, MintDrop, Nft, Offer } from '../types'
 import {
   activities as seedActivities,
   bulkBuy as doBulkBuy,
   buyNft as doBuy,
   collections as seedCollections,
-  CURRENT_USER,
+  formatAddress,
   listNft as doList,
   mintDrops as seedMints,
   mintFromDrop as doMint,
@@ -23,9 +24,14 @@ import {
 } from '../data/mockData'
 
 interface MarketplaceCtx {
+  /** Short display address, or empty when disconnected */
   user: string
+  /** Full wallet address when connected */
+  address: string | undefined
   connected: boolean
+  /** @deprecated Use ConnectWallet / wagmi connect — kept for compatibility */
   connect: () => void
+  /** @deprecated Use ConnectWallet disconnect */
   disconnect: () => void
   collections: Collection[]
   nfts: Nft[]
@@ -47,11 +53,15 @@ interface MarketplaceCtx {
 const MarketplaceContext = createContext<MarketplaceCtx | null>(null)
 
 export function MarketplaceProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState(CURRENT_USER)
-  const [connected, setConnected] = useState(true)
+  const { address, isConnected } = useAccount()
   const [tick, setTick] = useState(0)
 
   const refresh = useCallback(() => setTick((t) => t + 1), [])
+
+  const user = isConnected && address ? formatAddress(address) : ''
+  const connected = Boolean(isConnected && address)
+  // Full address used for ownership / trades when connected
+  const actor = address || ''
 
   const collections = useMemo(() => [...seedCollections], [tick])
   const nfts = useMemo(() => [...seedNfts], [tick])
@@ -59,20 +69,24 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const activities = useMemo(() => [...seedActivities], [tick])
   const mintDrops = useMemo(() => [...seedMints], [tick])
 
+  // Compatibility stubs — real connect UI is ConnectWallet
   const connect = () => {
-    setUser(CURRENT_USER)
-    setConnected(true)
+    /* no-op: open ConnectWallet modal via UI */
   }
-  const disconnect = () => setConnected(false)
+  const disconnect = () => {
+    /* no-op */
+  }
 
   const buy = (nftId: string) => {
-    const ok = doBuy(nftId, user)
+    if (!actor) return false
+    const ok = doBuy(nftId, formatAddress(actor))
     if (ok) refresh()
     return ok
   }
 
   const bulkBuy = (nftIds: string[]) => {
-    const n = doBulkBuy(nftIds, user)
+    if (!actor) return 0
+    const n = doBulkBuy(nftIds, formatAddress(actor))
     if (n > 0) refresh()
     return n
   }
@@ -84,13 +98,17 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   }
 
   const mint = (slug: string, quantity: number) => {
-    const n = doMint(slug, user, quantity)
+    if (!actor) return 0
+    const n = doMint(slug, formatAddress(actor), quantity)
     if (n > 0) refresh()
     return n
   }
 
   const makeOffer = (offer: Omit<Offer, 'id' | 'createdAt'>) => {
-    const o = doAddOffer(offer)
+    const o = doAddOffer({
+      ...offer,
+      offerer: actor ? formatAddress(actor) : offer.offerer,
+    })
     refresh()
     return o
   }
@@ -108,6 +126,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
     <MarketplaceContext.Provider
       value={{
         user,
+        address,
         connected,
         connect,
         disconnect,

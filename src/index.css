@@ -66,6 +66,13 @@ p, span, label, td, th, li {
   font-family: inherit;
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 0.8s linear infinite;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

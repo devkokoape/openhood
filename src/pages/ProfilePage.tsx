@@ -1,22 +1,26 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMarketplace } from '../context/MarketplaceContext'
-import { profiles } from '../data/mockData'
+import { profiles, formatAddress, formatPrice } from '../data/mockData'
 import { NftCard } from '../components/nft/NftCard'
 import { ActivityRow } from '../components/nft/ActivityRow'
 import { Tabs } from '../components/ui/Tabs'
 import { Badge } from '../components/ui/Badge'
-import { formatPrice } from '../data/mockData'
+import { ConnectWallet } from '../components/wallet/ConnectWallet'
 
 export function ProfilePage() {
-  const { address } = useParams()
-  const { user, nfts, activities, collections, offers } = useMarketplace()
-  const addr = address || user
-  const profile = profiles[addr] || {
+  const { address: routeAddress } = useParams()
+  const { user, address: walletAddress, connected, nfts, activities, collections, offers } =
+    useMarketplace()
+  // Prefer full wallet address for self profile
+  const addr = routeAddress || walletAddress || user || ''
+  const profile = profiles[addr] || profiles[user] || {
     address: addr,
-    displayName: addr,
+    displayName: connected && !routeAddress ? 'Your wallet' : addr || 'Not connected',
     avatar: '',
-    bio: 'OpenHood trader',
+    bio: connected
+      ? 'Connected on Robinhood Chain · OpenHood'
+      : 'Connect a wallet to view your holdings',
     joinedAt: '2026-01-01',
   }
 
@@ -62,9 +66,16 @@ export function ProfilePage() {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold text-ink">{profile.displayName}</h1>
-          <p className="font-mono text-sm text-ink-3 mt-0.5">{profile.address}</p>
-          <p className="text-sm text-ink-2 mt-2 max-w-xl">{profile.bio}</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold text-ink">{profile.displayName}</h1>
+              <p className="font-mono text-sm text-ink-3 mt-0.5 break-all">
+                {addr ? (addr.length > 20 ? addr : formatAddress(addr)) : '—'}
+              </p>
+              <p className="text-sm text-ink-2 mt-2 max-w-xl">{profile.bio}</p>
+            </div>
+            {!connected && !routeAddress && <ConnectWallet />}
+          </div>
           <div className="flex flex-wrap gap-4 mt-4 text-sm">
             <div>
               <span className="text-ink font-semibold">{owned.length}</span>{' '}
