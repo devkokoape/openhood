@@ -91,7 +91,7 @@ export function RankingsPage() {
           <select
             value={collectionId}
             onChange={(e) => setCollectionId(e.target.value)}
-            className="h-10 px-3 rounded-xl bg-surface-2 border border-edge text-sm text-ink min-w-[200px]"
+            className="h-10 px-3 rounded-xl bg-surface-2 border border-edge text-sm text-ink w-full sm:w-auto sm:min-w-[200px] max-w-full"
           >
             {collections.map((c) => (
               <option key={c.id} value={c.id}>

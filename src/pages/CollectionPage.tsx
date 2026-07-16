@@ -46,9 +46,9 @@ type GridSize = 'sm' | 'md' | 'lg'
 type BannerSize = 'sm' | 'md' | 'lg'
 
 const gridClass: Record<GridSize, string> = {
-  sm: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2',
-  md: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3',
-  lg: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4',
+  sm: 'grid-cols-2 min-[400px]:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-1.5 sm:gap-2',
+  md: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3',
+  lg: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4',
 }
 
 const bannerHeight: Record<BannerSize, string> = {
@@ -365,7 +365,12 @@ export function CollectionPage() {
   const descLong = collection.description.length > 140
 
   return (
-    <div className={clsx('animate-fade-in', sweepMode && selected.size > 0 && 'pb-28')}>
+    <div
+      className={clsx(
+        'animate-fade-in overflow-x-hidden',
+        sweepMode && selected.size > 0 && 'pb-32 sm:pb-28'
+      )}
+    >
       {toast && (
         <TxToast
           message={toast.msg}
@@ -389,8 +394,8 @@ export function CollectionPage() {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10" />
 
-        {/* Banner size controls */}
-        <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-xl bg-black/45 backdrop-blur-md border border-white/15 p-1">
+        {/* Banner size controls — hide on very small screens to reduce clutter */}
+        <div className="absolute top-2 right-2 sm:top-3 sm:right-3 z-10 flex items-center gap-0.5 sm:gap-1 rounded-lg sm:rounded-xl bg-black/45 backdrop-blur-md border border-white/15 p-0.5 sm:p-1 scale-90 sm:scale-100 origin-top-right">
           <button
             type="button"
             onClick={shrinkBanner}
@@ -429,7 +434,7 @@ export function CollectionPage() {
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
         </div>
-        <div className="absolute bottom-2 left-3 z-10 px-2 py-0.5 rounded-md bg-black/40 backdrop-blur text-[10px] font-semibold text-white/80 uppercase tracking-wide">
+        <div className="absolute bottom-2 left-2 sm:left-3 z-10 px-2 py-0.5 rounded-md bg-black/40 backdrop-blur text-[10px] font-semibold text-white/80 uppercase tracking-wide hidden sm:block">
           Banner {bannerSize}
         </div>
       </div>
@@ -506,13 +511,13 @@ export function CollectionPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap w-full sm:w-auto justify-start sm:justify-end">
                 {collection.openseaUrl && (
                   <a
                     href={collection.openseaUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="h-9 px-2.5 rounded-xl border border-edge bg-surface hover:bg-surface-2 flex items-center justify-center text-[11px] font-bold text-ink-2 hover:text-hood transition-colors"
+                    className="h-9 px-2.5 rounded-xl border border-edge bg-surface hover:bg-surface-2 flex items-center justify-center text-[11px] font-bold text-ink-2 hover:text-hood transition-colors shrink-0"
                     title="View on OpenSea"
                   >
                     OS
@@ -563,7 +568,8 @@ export function CollectionPage() {
                 )}
                 {isOnChainCol && (
                   <Button size="sm" variant="secondary" onClick={() => void handleMintDemo()}>
-                    Mint demo NFT
+                    <span className="sm:hidden">Mint</span>
+                    <span className="hidden sm:inline">Mint demo NFT</span>
                   </Button>
                 )}
                 <Button
@@ -575,11 +581,12 @@ export function CollectionPage() {
                   }}
                 >
                   <ShoppingCart className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{sweepMode ? 'Exit' : 'Sweep'}</span>
+                  <span>{sweepMode ? 'Exit' : 'Sweep'}</span>
                 </Button>
-                {!isOnChainCol && (
+                {!isOnChainCol && collection.source !== 'opensea' && (
                   <Button size="sm" onClick={() => setOfferOpen(true)}>
-                    Make offer
+                    <span className="sm:hidden">Offer</span>
+                    <span className="hidden sm:inline">Make offer</span>
                   </Button>
                 )}
               </div>
@@ -611,34 +618,47 @@ export function CollectionPage() {
           )}
         </div>
 
-        {/* OpenSea-style stat strip */}
-        <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3 sm:gap-x-8">
+        {/* OpenSea-style stat strip — 2-col grid on mobile, wrap on larger */}
+        <div className="mt-5 grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 lg:flex lg:flex-wrap gap-2 sm:gap-x-6 sm:gap-y-3">
           {[
-            { label: 'Floor price', value: formatPrice(collection.floorPrice), unit: 'ETH', accent: true },
-            { label: 'Top offer', value: colOffers[0] ? formatPrice(colOffers[0].price) : '—', unit: colOffers[0] ? 'ETH' : '' },
-            { label: '24h volume', value: formatPrice(collection.volume24h), unit: 'ETH' },
-            { label: 'Total volume', value: formatPrice(collection.volumeTotal), unit: 'ETH' },
-            { label: 'Listed', value: String(listedCount), unit: '' },
-            {
-              label: 'Auctions',
-              value: String(auctionCount),
-              unit: '',
-              accent: auctionCount > 0,
-            },
-            { label: 'Owners', value: collection.owners.toLocaleString(), unit: '' },
+            { label: 'Floor', value: formatPrice(collection.floorPrice), unit: 'ETH', accent: true },
+            { label: '24h vol', value: formatPrice(collection.volume24h), unit: 'ETH' },
+            { label: 'Total vol', value: formatPrice(collection.volumeTotal), unit: 'ETH' },
             { label: 'Items', value: collection.items.toLocaleString(), unit: '' },
+            { label: 'Owners', value: collection.owners.toLocaleString(), unit: '' },
+            { label: 'Listed', value: String(listedCount), unit: '' },
+            ...(isOnChainCol
+              ? [{ label: 'Auctions', value: String(auctionCount), unit: '', accent: auctionCount > 0 }]
+              : []),
+            ...(colOffers[0]
+              ? [
+                  {
+                    label: 'Top offer',
+                    value: formatPrice(colOffers[0].price),
+                    unit: 'ETH',
+                    accent: false as boolean | undefined,
+                  },
+                ]
+              : []),
           ].map((s) => (
-            <div key={s.label} className="min-w-[72px]">
-              <div className="text-[11px] text-ink-3 font-medium">{s.label}</div>
+            <div
+              key={s.label}
+              className="min-w-0 rounded-xl border border-edge bg-surface-2/50 px-3 py-2 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:min-w-[72px]"
+            >
+              <div className="text-[10px] sm:text-[11px] text-ink-3 font-medium truncate">
+                {s.label}
+              </div>
               <div
                 className={clsx(
-                  'text-base sm:text-lg font-bold tabular-nums mt-0.5',
+                  'text-sm sm:text-base lg:text-lg font-bold tabular-nums mt-0.5 truncate',
                   s.accent ? 'text-hood' : 'text-ink'
                 )}
               >
                 {s.value}
                 {s.unit && (
-                  <span className="text-xs font-semibold text-ink-3 ml-1">{s.unit}</span>
+                  <span className="text-[10px] sm:text-xs font-semibold text-ink-3 ml-0.5 sm:ml-1">
+                    {s.unit}
+                  </span>
                 )}
               </div>
             </div>
@@ -647,8 +667,8 @@ export function CollectionPage() {
       </div>
 
       {/* —— Sticky tabs (OpenSea style) —— */}
-      <div className="sticky top-14 z-30 mt-6 border-b border-edge bg-surface/95 backdrop-blur-xl">
-        <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6 flex items-center gap-1 overflow-x-auto hide-scrollbar">
+      <div className="sticky sticky-under-nav z-30 mt-5 sm:mt-6 border-b border-edge bg-surface/95 backdrop-blur-xl">
+        <div className="mx-auto max-w-[1600px] px-2 sm:px-4 lg:px-6 flex items-center gap-0.5 overflow-x-auto hide-scrollbar scroll-x">
           {mainTabs.map((t) => {
             const count =
               t.id === 'items'
@@ -667,7 +687,7 @@ export function CollectionPage() {
                   if (t.id !== 'items') setSweepMode(false)
                 }}
                 className={clsx(
-                  'relative px-4 py-3.5 text-sm font-semibold whitespace-nowrap transition-colors cursor-pointer',
+                  'relative px-3 sm:px-4 py-3 sm:py-3.5 text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0',
                   tab === t.id ? 'text-ink' : 'text-ink-3 hover:text-ink'
                 )}
               >
@@ -714,7 +734,7 @@ export function CollectionPage() {
             )}
 
             {/* Sticky toolbar */}
-            <div className="sticky top-[6.75rem] z-20 -mx-1 px-1 py-2 mb-3 bg-surface/95 backdrop-blur-md flex flex-wrap items-center gap-2 border-b border-edge">
+            <div className="sticky sticky-under-nav-toolbar z-20 -mx-1 px-1 py-2 mb-3 bg-surface/95 backdrop-blur-md flex flex-wrap items-center gap-2 border-b border-edge">
               <button
                 type="button"
                 onClick={() => {
@@ -725,7 +745,7 @@ export function CollectionPage() {
                   }
                 }}
                 className={clsx(
-                  'inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border text-sm font-medium cursor-pointer transition-colors',
+                  'inline-flex items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-colors shrink-0',
                   sidebarOpen || filterCount > 0
                     ? 'border-hood/40 bg-hood-muted text-hood'
                     : 'border-edge bg-surface-2 text-ink'
@@ -740,23 +760,20 @@ export function CollectionPage() {
                 )}
               </button>
 
-              <div className="hidden sm:block text-xs text-ink-3">
+              <div className="text-[11px] sm:text-xs text-ink-3 tabular-nums min-w-0 truncate">
                 {items.length.toLocaleString()}
                 {isOpenSeaCol && collection.items > 0 && (
-                  <>
-                    {' '}
-                    / {collection.items.toLocaleString()}
-                  </>
-                )}{' '}
-                item{items.length === 1 ? '' : 's'}
-                {openSeaNfts.loading && ' · loading…'}
+                  <> / {collection.items.toLocaleString()}</>
+                )}
+                <span className="hidden xs:inline"> items</span>
+                {openSeaNfts.loading && '…'}
               </div>
 
-              <div className="flex items-center gap-2 ml-auto">
+              <div className="flex items-center gap-1.5 sm:gap-2 ml-auto min-w-0">
                 <select
                   value={sort}
                   onChange={(e) => setSort(e.target.value as SortKey)}
-                  className="h-9 px-3 rounded-xl bg-surface-2 border border-edge text-sm text-ink max-w-[160px]"
+                  className="h-9 px-2 sm:px-3 rounded-xl bg-surface-2 border border-edge text-xs sm:text-sm text-ink max-w-[7.5rem] sm:max-w-[160px] min-w-0"
                 >
                   <option value="price_asc">Price low to high</option>
                   <option value="price_desc">Price high to low</option>
@@ -1151,7 +1168,7 @@ export function CollectionPage() {
 
       {/* Sticky sweep cart */}
       {sweepMode && selected.size > 0 && (
-        <div className="fixed bottom-0 inset-x-0 z-40 border-t border-edge bg-surface/95 backdrop-blur-xl shadow-[0_-8px_30px_rgba(0,0,0,0.15)]">
+        <div className="fixed bottom-0 inset-x-0 z-40 border-t border-edge bg-surface/95 backdrop-blur-xl shadow-[0_-8px_30px_rgba(0,0,0,0.15)] pb-safe">
           <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
             <div className="flex-1 min-w-0 flex items-center gap-3">
               <div className="flex -space-x-2">

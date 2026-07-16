@@ -176,16 +176,16 @@ export function NftCard({
   )
 
   const shell = clsx(
-    'group border-2 bg-surface overflow-hidden transition-all duration-200',
+    'group border-2 bg-surface overflow-hidden transition-all duration-200 min-w-0',
     compact ? 'rounded-xl' : 'rounded-2xl',
     selected && 'ring-2 ring-hood/40 shadow-md',
-    // Distinct borders by market state
+    // Distinct borders by market state (hover lift only on fine pointers via CSS)
     inAuction && !selected &&
-      'border-amber-500/80 shadow-[0_0_0_1px_rgba(245,158,11,0.25)] hover:border-amber-400 hover:shadow-amber-500/15 hover:shadow-lg hover:-translate-y-0.5',
+      'border-amber-500/80 shadow-[0_0_0_1px_rgba(245,158,11,0.25)] sm:hover:border-amber-400',
     isListed && !selected && !inAuction &&
-      'border-hood/50 hover:border-hood hover:shadow-lg hover:shadow-hood/10 hover:-translate-y-0.5',
+      'border-hood/50 sm:hover:border-hood',
     !inAuction && !isListed && !selected &&
-      'border-edge hover:shadow-lg hover:shadow-black/5 dark:hover:shadow-black/40 hover:-translate-y-0.5',
+      'border-edge sm:hover:shadow-lg sm:hover:shadow-black/5 dark:sm:hover:shadow-black/40',
     selected && inAuction && 'border-amber-500',
     selected && isListed && !inAuction && 'border-hood',
     selected && !inAuction && !isListed && 'border-hood'

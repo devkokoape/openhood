@@ -14,7 +14,7 @@ export function TxToast({
   onClose: () => void
 }) {
   return (
-    <div className="fixed top-20 right-4 z-[150] max-w-sm w-[min(100%-2rem,24rem)] px-4 py-3 rounded-xl bg-surface border border-edge shadow-2xl animate-fade-in">
+    <div className="fixed top-[4.75rem] left-3 right-3 sm:left-auto sm:right-4 z-[150] max-w-sm sm:w-[min(100%-2rem,24rem)] mx-auto sm:mx-0 px-4 py-3 rounded-xl bg-surface border border-edge shadow-2xl animate-fade-in">
       <div className="flex items-start gap-2">
         {pending && <Loader2 className="w-4 h-4 animate-spin text-hood shrink-0 mt-0.5" />}
         <div className="flex-1 min-w-0">

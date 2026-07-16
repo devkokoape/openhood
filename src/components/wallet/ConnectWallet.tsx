@@ -271,7 +271,7 @@ export function ConnectWallet({
         size={compact ? 'sm' : 'md'}
         onClick={() => setOpen(true)}
         disabled={busy}
-        className={className}
+        className={clsx('!px-2.5 sm:!px-4 shrink-0', className)}
       >
         {busy ? (
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -284,7 +284,7 @@ export function ConnectWallet({
       {open &&
         createPortal(
           <div
-            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4 modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="connect-wallet-title"
@@ -296,28 +296,31 @@ export function ConnectWallet({
               aria-hidden
             />
 
-            {/* Centered modal */}
-            <div className="relative z-10 w-full max-w-md rounded-2xl border border-edge bg-surface shadow-2xl animate-fade-in overflow-hidden max-h-[min(90vh,560px)] flex flex-col mx-auto">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-edge shrink-0">
-                <div>
-                  <h2 id="connect-wallet-title" className="text-lg font-bold text-ink">
+            {/* Bottom sheet on mobile, centered on desktop */}
+            <div className="relative z-10 w-full max-w-md rounded-t-2xl sm:rounded-2xl border border-edge bg-surface shadow-2xl animate-fade-in overflow-hidden max-h-[min(92dvh,560px)] flex flex-col mx-auto modal-sheet-panel">
+              <div className="sm:hidden flex justify-center pt-2 pb-0">
+                <div className="w-10 h-1 rounded-full bg-edge" />
+              </div>
+              <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 sm:py-4 border-b border-edge shrink-0">
+                <div className="min-w-0 pr-2">
+                  <h2 id="connect-wallet-title" className="text-base sm:text-lg font-bold text-ink">
                     Connect wallet
                   </h2>
-                  <p className="text-xs text-ink-3 mt-0.5">
-                    {targetChain.name} · chain ID {targetChain.id}
+                  <p className="text-[11px] sm:text-xs text-ink-3 mt-0.5 truncate">
+                    {targetChain.name} · {targetChain.id}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-2 hover:bg-surface-2 cursor-pointer"
+                  className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-ink-2 hover:bg-surface-2 cursor-pointer shrink-0"
                   aria-label="Close"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="p-3 space-y-2 overflow-y-auto flex-1">
+              <div className="p-3 space-y-2 overflow-y-auto flex-1 overscroll-contain pb-safe">
                 {list.length === 0 && (
                   <div className="px-3 py-8 text-center">
                     <Wallet className="w-8 h-8 text-ink-3 mx-auto mb-3" />

@@ -56,8 +56,8 @@ export function ActivityRow({ activity }: { activity: Activity }) {
       : undefined)
 
   return (
-    <div className="flex items-center gap-3 px-3 py-3 border-b border-edge last:border-0 hover:bg-surface-2/60 transition-colors">
-      <div className="w-10 h-10 rounded-lg bg-surface-3 flex items-center justify-center shrink-0 overflow-hidden">
+    <div className="flex items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 border-b border-edge last:border-0 hover:bg-surface-2/60 transition-colors min-w-0">
+      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-surface-3 flex items-center justify-center shrink-0 overflow-hidden">
         {image ? (
           <img src={image} alt="" className="w-full h-full object-cover" />
         ) : (
@@ -65,25 +65,25 @@ export function ActivityRow({ activity }: { activity: Activity }) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
           <Badge tone={meta.tone}>{meta.label}</Badge>
           {nftLabel && activity.nftId ? (
             <Link
               to={`/nft/${activity.nftId}`}
-              className="text-sm font-medium text-ink hover:text-hood truncate"
+              className="text-xs sm:text-sm font-medium text-ink hover:text-hood truncate max-w-[10rem] sm:max-w-none"
             >
               {nftLabel}
             </Link>
           ) : col ? (
             <Link
               to={`/collection/${col.slug}`}
-              className="text-sm font-medium text-ink hover:text-hood truncate"
+              className="text-xs sm:text-sm font-medium text-ink hover:text-hood truncate max-w-[10rem] sm:max-w-none"
             >
               {col.name}
             </Link>
           ) : null}
         </div>
-        <div className="text-xs text-ink-3 mt-0.5 truncate">
+        <div className="text-[10px] sm:text-xs text-ink-3 mt-0.5 truncate font-mono">
           {activity.from}
           {activity.to && (
             <>
@@ -93,19 +93,22 @@ export function ActivityRow({ activity }: { activity: Activity }) {
           )}
         </div>
       </div>
-      <div className="text-right shrink-0">
+      <div className="text-right shrink-0 pl-1">
         {activity.price != null && (
-          <div className="text-sm font-semibold text-ink tabular-nums">
+          <div className="text-xs sm:text-sm font-semibold text-ink tabular-nums">
             {activity.price === 0 && activity.type === 'mint' ? (
               <span className="text-hood text-xs">Free</span>
             ) : (
               <>
-                {formatPrice(activity.price)} <span className="text-hood text-xs">ETH</span>
+                {formatPrice(activity.price)}{' '}
+                <span className="text-hood text-[10px] sm:text-xs">ETH</span>
               </>
             )}
           </div>
         )}
-        <div className="text-[11px] text-ink-3">{timeAgo(activity.timestamp)}</div>
+        <div className="text-[10px] sm:text-[11px] text-ink-3 whitespace-nowrap">
+          {timeAgo(activity.timestamp)}
+        </div>
       </div>
     </div>
   )

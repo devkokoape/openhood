@@ -69,8 +69,49 @@ export function CollectionsPage() {
         />
       </div>
 
-      <div className="rounded-2xl border border-edge overflow-hidden bg-surface">
-        <div className="overflow-x-auto">
+      {/* Mobile card list */}
+      <div className="md:hidden space-y-2">
+        {sorted.map((c, i) => (
+          <Link
+            key={c.id}
+            to={`/collection/${c.slug}`}
+            className="flex items-center gap-3 p-3 rounded-2xl border border-edge bg-surface hover:border-hood/40 active:bg-surface-2 transition-colors"
+          >
+            <span className="text-xs text-ink-3 tabular-nums w-5 shrink-0">{i + 1}</span>
+            <img
+              src={c.image}
+              alt=""
+              className="w-11 h-11 rounded-xl object-cover shrink-0 ring-1 ring-edge"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-ink truncate flex items-center gap-1 text-sm">
+                {c.name}
+                {c.verified && <BadgeCheck className="w-3.5 h-3.5 text-hood shrink-0" />}
+              </div>
+              <div className="text-[11px] text-ink-3 mt-0.5 tabular-nums">
+                Floor{' '}
+                <span className="text-hood font-semibold">{formatPrice(c.floorPrice)}</span>
+                <span className="mx-1.5 text-edge">·</span>
+                24h{' '}
+                <span className="text-ink font-semibold">{formatPrice(c.volume24h)}</span>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-[10px] text-ink-3">Items</div>
+              <div className="text-xs font-bold tabular-nums text-ink">
+                {c.items.toLocaleString()}
+              </div>
+            </div>
+          </Link>
+        ))}
+        {sorted.length === 0 && (
+          <p className="py-10 text-center text-ink-3 text-sm">No collections match your filter.</p>
+        )}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block rounded-2xl border border-edge overflow-hidden bg-surface">
+        <div className="overflow-x-auto table-scroll">
           <table className="w-full text-sm min-w-[720px]">
             <thead>
               <tr className="border-b border-edge bg-surface-2 text-left text-xs font-semibold text-ink-3 uppercase tracking-wide">

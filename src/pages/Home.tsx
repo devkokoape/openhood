@@ -42,16 +42,16 @@ export function Home() {
       {/* Full-bleed-ish hero area */}
       <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 pt-4 pb-2">
         {isMarketplaceDeployed() && (
-          <div className="mb-3 rounded-xl border border-hood/40 bg-hood-muted px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
+          <div className="mb-3 rounded-xl border border-hood/40 bg-hood-muted px-3 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="min-w-0">
               <div className="text-sm font-bold text-ink">Live on Robinhood testnet</div>
-              <p className="text-xs text-ink-2 mt-0.5">
-                Mint, list, buy & auction with a 2.5% fee via OpenHoodMarketplace.
+              <p className="text-xs text-ink-2 mt-0.5 leading-relaxed">
+                Mint, list, buy & auction with a 2.5% fee.
               </p>
             </div>
             <Link
               to={`/collection/${ONCHAIN_COLLECTION_SLUG}`}
-              className="inline-flex items-center justify-center h-9 px-4 rounded-xl bg-hood text-[#0b0e11] text-sm font-semibold shrink-0"
+              className="inline-flex items-center justify-center h-10 sm:h-9 px-4 rounded-xl bg-hood text-[#0b0e11] text-sm font-semibold shrink-0 w-full sm:w-auto"
             >
               Open testnet collection →
             </Link>

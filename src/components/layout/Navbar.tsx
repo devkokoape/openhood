@@ -17,11 +17,11 @@ import { useMarketplace } from '../../context/MarketplaceContext'
 import { ConnectWallet } from '../wallet/ConnectWallet'
 
 const links = [
-  { to: '/', label: 'Discover', end: true },
-  { to: '/collections', label: 'Collections', end: false },
-  { to: '/rankings', label: 'Rankings', end: false },
-  { to: '/degen', label: 'Degen Mode', end: false },
-  { to: '/activity', label: 'Activity', end: false },
+  { to: '/', label: 'Discover', end: true, icon: Layers },
+  { to: '/collections', label: 'Collections', end: false, icon: Layers },
+  { to: '/rankings', label: 'Rankings', end: false, icon: Activity },
+  { to: '/degen', label: 'Degen', end: false, icon: Zap },
+  { to: '/activity', label: 'Activity', end: false, icon: Activity },
 ]
 
 export function Navbar() {
@@ -37,9 +37,22 @@ export function Navbar() {
     return () => window.clearInterval(id)
   }, [])
 
+  // Lock body scroll when mobile menu open
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [open])
+
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    if (q.trim()) navigate(`/collections?q=${encodeURIComponent(q.trim())}`)
+    if (q.trim()) {
+      navigate(`/collections?q=${encodeURIComponent(q.trim())}`)
+      setOpen(false)
+    }
   }
 
   const liveAge =
@@ -48,21 +61,21 @@ export function Navbar() {
       : null
 
   return (
-    <header className="sticky top-0 z-40 border-b border-edge bg-surface/80 backdrop-blur-xl">
-      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 h-14 flex items-center gap-3">
-        <Link to="/" className="flex items-center gap-2 shrink-0 group">
-          <div className="w-7 h-7 rounded-lg bg-hood flex items-center justify-center shadow-sm shadow-hood/30">
+    <header className="sticky top-0 z-40 border-b border-edge bg-surface/90 backdrop-blur-xl pt-safe">
+      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 h-14 flex items-center gap-2 sm:gap-3 min-w-0">
+        <Link to="/" className="flex items-center gap-1.5 sm:gap-2 shrink-0 group min-w-0">
+          <div className="w-8 h-8 sm:w-7 sm:h-7 rounded-lg bg-hood flex items-center justify-center shadow-sm shadow-hood/30 shrink-0">
             <Layers className="w-3.5 h-3.5 text-[#0b0e11]" strokeWidth={2.5} />
           </div>
-          <span className="font-bold text-base tracking-tight text-ink group-hover:text-hood transition-colors">
+          <span className="font-bold text-sm sm:text-base tracking-tight text-ink group-hover:text-hood transition-colors truncate">
             Open<span className="text-hood">Hood</span>
           </span>
         </Link>
 
-        {/* Live OpenSea pulse */}
+        {/* Live pulse — compact on tablet+ */}
         <div
           className={clsx(
-            'hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border',
+            'hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border shrink-0',
             openSeaStatus.live
               ? 'border-hood/40 bg-hood-muted text-hood'
               : 'border-edge bg-surface-2 text-ink-3'
@@ -71,12 +84,12 @@ export function Navbar() {
             openSeaStatus.lastError ||
             (openSeaStatus.live
               ? 'OpenSea Robinhood stats refreshing every 1s'
-              : 'Waiting for OpenSea — set VITE_OPENSEA_API_KEY for production live data')
+              : 'Waiting for OpenSea live data')
           }
         >
           <span
             className={clsx(
-              'w-1.5 h-1.5 rounded-full',
+              'w-1.5 h-1.5 rounded-full shrink-0',
               openSeaStatus.live
                 ? 'bg-hood animate-pulse'
                 : openSeaStatus.refreshing
@@ -84,16 +97,18 @@ export function Navbar() {
                   : 'bg-ink-3'
             )}
           />
-          {openSeaStatus.live
-            ? liveAge != null && liveAge < 3
-              ? 'Live OpenSea'
-              : `OpenSea ${liveAge ?? '—'}s`
-            : openSeaStatus.refreshing
-              ? 'Syncing…'
-              : 'OpenSea offline'}
+          <span className="whitespace-nowrap">
+            {openSeaStatus.live
+              ? liveAge != null && liveAge < 3
+                ? 'Live'
+                : `${liveAge ?? '—'}s`
+              : openSeaStatus.refreshing
+                ? '…'
+                : 'Offline'}
+          </span>
         </div>
 
-        <nav className="hidden md:flex items-center gap-0.5 ml-1">
+        <nav className="hidden md:flex items-center gap-0.5 ml-1 min-w-0">
           {links.map((l) => (
             <NavLink
               key={l.to}
@@ -101,7 +116,7 @@ export function Navbar() {
               end={l.end}
               className={({ isActive }) =>
                 clsx(
-                  'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                  'px-2.5 lg:px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap',
                   l.to === '/degen' && 'text-hood/90',
                   isActive
                     ? 'text-hood bg-hood-muted'
@@ -109,14 +124,21 @@ export function Navbar() {
                 )
               }
             >
-              {l.label}
+              {l.label === 'Degen' ? (
+                <>
+                  <span className="lg:hidden">Degen</span>
+                  <span className="hidden lg:inline">Degen Mode</span>
+                </>
+              ) : (
+                l.label
+              )}
             </NavLink>
           ))}
         </nav>
 
-        <form onSubmit={onSearch} className="hidden lg:flex flex-1 max-w-sm ml-2">
+        <form onSubmit={onSearch} className="hidden lg:flex flex-1 max-w-sm ml-2 min-w-0">
           <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3 pointer-events-none" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -126,8 +148,9 @@ export function Navbar() {
           </div>
         </form>
 
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="flex items-center gap-1 sm:gap-1.5 ml-auto shrink-0">
           <button
+            type="button"
             onClick={toggle}
             className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-2 hover:bg-surface-2 hover:text-ink transition-colors cursor-pointer"
             aria-label="Toggle theme"
@@ -135,66 +158,94 @@ export function Navbar() {
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          <div className="hidden sm:block">
+          {/* Connect always visible — was sm:block only and broke mobile wallet */}
+          <div className="max-w-[9.5rem] sm:max-w-none">
             <ConnectWallet compact />
           </div>
 
           <Link
             to="/profile"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-2 hover:bg-surface-2 hover:text-hood transition-colors"
+            className="hidden sm:flex w-9 h-9 rounded-lg items-center justify-center text-ink-2 hover:bg-surface-2 hover:text-hood transition-colors"
+            aria-label="Profile"
           >
             <User className="w-4 h-4" />
           </Link>
 
           <button
+            type="button"
             className="md:hidden w-9 h-9 rounded-lg flex items-center justify-center text-ink-2 hover:bg-surface-2 cursor-pointer"
             onClick={() => setOpen((o) => !o)}
-            aria-label="Menu"
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
           >
             {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
       </div>
 
+      {/* Mobile drawer */}
       {open && (
-        <div className="md:hidden border-t border-edge bg-surface px-3 py-3 space-y-1 animate-fade-in">
-          <form onSubmit={onSearch} className="mb-2 lg:hidden">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search…"
-                className="w-full h-10 pl-10 pr-4 rounded-xl bg-surface-2 border border-edge text-sm"
-              />
-            </div>
-          </form>
-          {links.map((l) => (
-            <Link
-              key={l.to}
-              to={l.to}
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-ink-2 hover:bg-surface-2 hover:text-ink"
-            >
-              {l.to === '/activity' && <Activity className="w-4 h-4" />}
-              {l.to === '/degen' && <Zap className="w-4 h-4" />}
-              {l.to === '/collections' && <Layers className="w-4 h-4" />}
-              {l.to === '/' && <Layers className="w-4 h-4" />}
-              {l.label}
-            </Link>
-          ))}
-          <Link
-            to="/profile"
+        <>
+          <div
+            className="md:hidden fixed inset-0 top-14 z-40 bg-black/40 backdrop-blur-[2px]"
             onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-ink-2 hover:bg-surface-2"
-          >
-            <User className="w-4 h-4" />
-            Profile
-          </Link>
-          <div className="pt-2" onClick={() => setOpen(false)}>
-            <ConnectWallet className="w-full" />
+            aria-hidden
+          />
+          <div className="md:hidden absolute left-0 right-0 top-full z-50 border-b border-edge bg-surface shadow-xl max-h-[min(80dvh,calc(100dvh-3.5rem))] overflow-y-auto pb-safe animate-fade-in">
+            <div className="px-3 py-3 space-y-1">
+              <form onSubmit={onSearch} className="mb-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-3 pointer-events-none" />
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Search collections…"
+                    className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-edge text-sm text-ink"
+                    autoComplete="off"
+                  />
+                </div>
+              </form>
+
+              <div
+                className={clsx(
+                  'flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold mb-1',
+                  openSeaStatus.live ? 'bg-hood-muted text-hood' : 'bg-surface-2 text-ink-3'
+                )}
+              >
+                <span
+                  className={clsx(
+                    'w-1.5 h-1.5 rounded-full',
+                    openSeaStatus.live ? 'bg-hood animate-pulse' : 'bg-ink-3'
+                  )}
+                />
+                {openSeaStatus.live ? 'OpenSea live data' : 'OpenSea syncing / offline'}
+              </div>
+
+              {links.map((l) => {
+                const Icon = l.icon
+                return (
+                  <Link
+                    key={l.to}
+                    to={l.to}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-surface-3"
+                  >
+                    <Icon className="w-4 h-4 shrink-0 text-hood" />
+                    {l.to === '/degen' ? 'Degen Mode' : l.label}
+                  </Link>
+                )
+              })}
+              <Link
+                to="/profile"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold text-ink-2 hover:bg-surface-2"
+              >
+                <User className="w-4 h-4 shrink-0 text-hood" />
+                Profile
+              </Link>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </header>
   )

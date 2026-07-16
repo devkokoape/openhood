@@ -232,7 +232,7 @@ export function NftDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 animate-fade-in">
+    <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-4 sm:py-6 animate-fade-in overflow-x-hidden">
       {toast && (
         <TxToast
           message={toast.msg}
@@ -245,16 +245,16 @@ export function NftDetailPage() {
         <TxToast message={txError.message.slice(0, 120)} onClose={() => resetTx()} />
       )}
 
-      <div className="grid lg:grid-cols-2 gap-8">
-        <div className="rounded-2xl border border-edge overflow-hidden bg-surface-2 aspect-square">
+      <div className="grid lg:grid-cols-2 gap-4 sm:gap-8">
+        <div className="rounded-xl sm:rounded-2xl border border-edge overflow-hidden bg-surface-2 aspect-square max-h-[min(100vw-1.5rem,28rem)] lg:max-h-none mx-auto w-full">
           <img src={nft.image} alt={nft.name} className="w-full h-full object-cover" />
         </div>
 
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Link
               to={`/collection/${collection.slug}`}
-              className="inline-flex items-center gap-1.5 text-sm text-hood font-medium hover:underline"
+              className="inline-flex items-center gap-1.5 text-sm text-hood font-medium hover:underline min-w-0"
             >
               {collection.name}
               {collection.verified && <BadgeCheck className="w-4 h-4" />}
@@ -264,10 +264,10 @@ export function NftDetailPage() {
               <Badge tone="muted">Fee {feeBpsToPercent(feeBps)}</Badge>
             )}
           </div>
-          <h1 className="text-3xl font-bold text-ink mt-1">{nft.name}</h1>
-          <p className="text-sm text-ink-3 mt-2">
+          <h1 className="text-2xl sm:text-3xl font-bold text-ink mt-1 break-anywhere">{nft.name}</h1>
+          <p className="text-sm text-ink-3 mt-2 break-anywhere">
             Owned by{' '}
-            <Link to={`/profile/${nft.owner}`} className="text-ink font-mono hover:text-hood">
+            <Link to={`/profile/${nft.owner}`} className="text-ink font-mono hover:text-hood break-all">
               {nft.owner}
             </Link>
           </p>
