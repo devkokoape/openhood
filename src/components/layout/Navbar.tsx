@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../../context/ThemeContext'
 import { ConnectWallet } from '../wallet/ConnectWallet'
+import { NetworkBadge } from '../wallet/NetworkBadge'
 
 const links = [
   { to: '/', label: 'Discover', end: true, icon: Layers },
@@ -99,6 +100,8 @@ export function Navbar() {
         </form>
 
         <div className="flex items-center gap-1 sm:gap-1.5 ml-auto shrink-0">
+          <NetworkBadge compact />
+
           <button
             type="button"
             onClick={toggle}

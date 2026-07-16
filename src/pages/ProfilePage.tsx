@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { Package } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
-import { profiles, formatAddress, formatPrice } from '../data/mockData'
+import { profiles, formatPrice } from '../data/mockData'
 import { NftCard } from '../components/nft/NftCard'
 import { ActivityRow } from '../components/nft/ActivityRow'
 import { Tabs } from '../components/ui/Tabs'
 import { Badge } from '../components/ui/Badge'
+import { EmptyState } from '../components/ui/EmptyState'
+import { AddressDisplay } from '../components/ui/AddressDisplay'
 import { ConnectWallet } from '../components/wallet/ConnectWallet'
 
 export function ProfilePage() {
@@ -86,6 +89,11 @@ export function ProfilePage() {
     )
   }, [offers, addr, routeAddress, connected, isOwnerOf])
 
+  const listedOwned = useMemo(
+    () => owned.filter((n) => n.listed || n.inAuction),
+    [owned]
+  )
+
   const estValue = owned.reduce((s, n) => {
     const col = collections.find((c) => c.id === n.collectionId)
     return s + (n.price ?? col?.floorPrice ?? 0)
@@ -93,8 +101,9 @@ export function ProfilePage() {
 
   return (
     <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-6 animate-fade-in">
-      <div className="rounded-2xl border border-edge bg-surface-2 p-6 md:p-8 flex flex-col sm:flex-row gap-5 items-start">
-        <div className="w-20 h-20 rounded-2xl bg-hood overflow-hidden shrink-0">
+      <div className="rounded-2xl border border-edge bg-surface-2 p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row gap-5 items-start relative overflow-hidden">
+        <div className="pointer-events-none absolute -top-20 -right-16 w-56 h-56 rounded-full bg-hood/10 blur-3xl" />
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-hood overflow-hidden shrink-0 relative z-[1]">
           {profile.avatar ? (
             <img src={profile.avatar} alt="" className="w-full h-full object-cover" />
           ) : (
@@ -103,39 +112,59 @@ export function ProfilePage() {
             </div>
           )}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 relative z-[1]">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-bold text-ink">{profile.displayName}</h1>
-              <p className="font-mono text-sm text-ink-3 mt-0.5 break-all">
-                {addr ? (addr.length > 20 ? addr : formatAddress(addr)) : '—'}
-              </p>
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-extrabold text-ink">
+                {profile.displayName}
+              </h1>
+              <div className="mt-1 text-sm text-ink-3">
+                {addr ? (
+                  <AddressDisplay address={addr} showCopy={addr.startsWith('0x')} />
+                ) : (
+                  '—'
+                )}
+              </div>
               <p className="text-sm text-ink-2 mt-2 max-w-xl">{profile.bio}</p>
             </div>
             {!connected && !routeAddress && <ConnectWallet />}
           </div>
-          <div className="flex flex-wrap gap-4 mt-4 text-sm">
-            <div>
-              <span className="text-ink font-semibold">{owned.length}</span>{' '}
-              <span className="text-ink-3">NFTs</span>
-            </div>
-            <div>
-              <span className="text-ink font-semibold">{byCollection.length}</span>{' '}
-              <span className="text-ink-3">Collections</span>
-            </div>
-            <div>
-              <span className="text-ink font-semibold tabular-nums">{formatPrice(estValue)}</span>{' '}
-              <span className="text-hood">ETH</span>{' '}
-              <span className="text-ink-3">est. value</span>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+            {[
+              { label: 'NFTs', value: String(owned.length) },
+              { label: 'Collections', value: String(byCollection.length) },
+              { label: 'Listed', value: String(listedOwned.length) },
+              {
+                label: 'Est. value',
+                value: `${formatPrice(estValue)} ETH`,
+                accent: true,
+              },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className="rounded-xl border border-edge bg-surface/60 px-3 py-2"
+              >
+                <div className="text-[10px] uppercase tracking-wide text-ink-3 font-semibold">
+                  {s.label}
+                </div>
+                <div
+                  className={`text-sm font-extrabold tabular-nums mt-0.5 ${
+                    s.accent ? 'text-hood' : 'text-ink'
+                  }`}
+                >
+                  {s.value}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-6 sm:mt-8">
         <Tabs
           tabs={[
-            { id: 'collected', label: 'Collected', count: owned.length },
+            { id: 'collected', label: 'Holdings', count: owned.length },
+            { id: 'listed', label: 'Listings', count: listedOwned.length },
             { id: 'collections', label: 'By collection', count: byCollection.length },
             { id: 'offers', label: 'Offers', count: userOffers.length },
             { id: 'activity', label: 'Activity', count: userActivity.length },
@@ -146,20 +175,48 @@ export function ProfilePage() {
       </div>
 
       {tab === 'collected' && (
-        <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {owned.length === 0 && (
-            <p className="col-span-full text-ink-3 text-sm py-8 text-center">No NFTs yet.</p>
+        <div className="mt-5">
+          {owned.length === 0 ? (
+            <EmptyState
+              title="No NFTs yet"
+              description="Mint on OpenHood testnet or buy from the market to fill your profile."
+              actionLabel="Browse market"
+              actionTo="/"
+              icon={<Package className="w-5 h-5" />}
+            />
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3">
+              {owned.map((n) => (
+                <NftCard key={n.id} nft={n} />
+              ))}
+            </div>
           )}
-          {owned.map((n) => (
-            <NftCard key={n.id} nft={n} />
-          ))}
+        </div>
+      )}
+
+      {tab === 'listed' && (
+        <div className="mt-5">
+          {listedOwned.length === 0 ? (
+            <EmptyState
+              title="No active listings"
+              description="List an NFT you own to appear here."
+              actionLabel="Discover"
+              actionTo="/"
+            />
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3">
+              {listedOwned.map((n) => (
+                <NftCard key={n.id} nft={n} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       {tab === 'collections' && (
         <div className="mt-5 space-y-8">
           {byCollection.length === 0 && (
-            <p className="text-ink-3 text-sm py-8 text-center">No collections held.</p>
+            <EmptyState title="No collections held" description="NFTs you collect will group here." />
           )}
           {byCollection.map(({ collection, items }) => (
             <section key={collection.id}>

@@ -7,24 +7,29 @@ Inspired by [ord.net](https://ord.net)-style marketplace UX, with Robinhood gree
 ## Features
 
 - **Trade NFTs** — browse collections, buy listed items, list your own
-- **Offers** — single-item offers and collection-wide offers
-- **Bulk buy** — multi-select floor listings and purchase in one cart
-- **Profiles** — view wallet holdings grouped by collection
-- **Activity** — global feed of sales, listings, and bids
-- **Founder tools** — collection founders can edit website / social links
-- **OpenSea analytics** — Robinhood Chain collection floors, volumes, and interval sales from OpenSea [Analytics & Events](https://docs.opensea.io/reference/analytics-and-events) (`GET /api/v2/collections/{slug}/stats`)
-- **Insights** — 1H / 1D / 7D / 30D / 1Y / All ranges with sales depth + floor charts
-- **Resizable banner** — small / medium / large collection banner
+- **On-chain testnet market** — mint, list, buy, English auction (2.5% fee)
+- **Offers** — single-item + collection-wide (demo catalog)
+- **Bulk buy / sweep** — multi-select floor listings (on-chain sequential buys)
+- **Profiles** — holdings, listings, offers, activity, portfolio estimate
+- **Activity** — filterable feed (sales / listings / mints / bids)
+- **Trending** — 24h · 1d · 7d · 30d · All volume leaderboard
+- **Notable collections** — top 7-day sales (single horizontal row)
+- **OpenSea live stats** — floors, volumes, NFT pagination (API key)
+- **Insights** — time ranges, sales depth, floor charts
+- **Toasts** — sonner feedback for buy / list / offer / mint
+- **Network badge** — switch to Robinhood mainnet/testnet from the nav
+- **Founder tools** — edit collection links (demo ownership)
 
 ### OpenSea data
 
-Snapshot of live Robinhood Chain collections is in `src/data/opensea-robinhood-snapshot.json`.
-
-Optional live refresh (events require a key):
+- Snapshot fallback: `src/data/opensea-robinhood-snapshot.json`
+- Live refresh every ~1s when `VITE_OPENSEA_API_KEY` is set
+- Local dev can use Vite proxy `/opensea-api` (see `vite.config.ts`)
 
 ```bash
-# .env
+# .env (never commit real keys)
 VITE_OPENSEA_API_KEY=your_key
+# GitHub Pages: set secret OPENSEA_API_KEY (wired in deploy.yml)
 ```
 
 Docs: https://docs.opensea.io/docs/query-analytics-and-events  
@@ -32,11 +37,12 @@ Chain browse: https://opensea.io/collections/chain/robinhood
 
 ## Stack
 
-- React + TypeScript + Vite
+- React 19 + TypeScript + Vite 8
 - Tailwind CSS v4
-- React Router
-- **wagmi + viem** wallet connect (Robinhood Chain `4663`)
-- OpenSea stats snapshot + mock marketplace actions
+- React Router v7
+- **wagmi v3 + viem** (Robinhood mainnet `4663` + testnet `46630`)
+- **sonner** toasts
+- OpenSea API + on-chain Hardhat marketplace
 
 ## Marketplace smart contracts
 

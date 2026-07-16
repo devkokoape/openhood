@@ -4,6 +4,7 @@ import { Check, Gavel, Tag } from 'lucide-react'
 import type { Nft } from '../../types'
 import { formatPrice } from '../../data/mockData'
 import { useMarketplace } from '../../context/MarketplaceContext'
+import { SafeImage } from '../ui/SafeImage'
 
 interface Props {
   nft: Nft
@@ -50,9 +51,10 @@ export function NftCard({
   const body = (
     <>
       <div className="relative aspect-square bg-surface-2 overflow-hidden">
-        <img
+        <SafeImage
           src={nft.image}
           alt={nft.name}
+          fallbackSeed={nft.id}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
 

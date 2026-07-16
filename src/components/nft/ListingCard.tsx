@@ -7,6 +7,7 @@ import { BadgeCheck } from 'lucide-react'
 import type { Collection, Nft } from '../../types'
 import { formatPrice } from '../../data/mockData'
 import clsx from 'clsx'
+import { SafeImage } from '../ui/SafeImage'
 
 interface Props {
   nft: Nft
@@ -34,10 +35,10 @@ export function ListingCard({ nft, collection, showBuyCue = true }: Props) {
     >
       {/* Media */}
       <div className="relative aspect-square bg-surface-2 overflow-hidden">
-        <img
+        <SafeImage
           src={nft.image}
           alt={nft.name}
-          loading="lazy"
+          fallbackSeed={nft.id}
           className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
         />
         {/* Bottom gradient for price legibility on bright art */}

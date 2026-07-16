@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { useMarketplace } from '../../context/MarketplaceContext'
@@ -58,7 +59,17 @@ export function OfferModal({
       return
     }
     const p = parseFloat(price)
-    if (!p || p <= 0 || Number.isNaN(p)) return
+    if (!p || p <= 0 || Number.isNaN(p)) {
+      toast.error('Enter a valid offer price in ETH')
+      return
+    }
+    if (type === 'collection') {
+      const q = parseInt(quantity, 10)
+      if (!q || q < 1) {
+        toast.error('Quantity must be at least 1')
+        return
+      }
+    }
     const expiresAt = new Date(Date.now() + parseInt(days, 10) * 86400_000).toISOString()
     try {
       makeOffer({

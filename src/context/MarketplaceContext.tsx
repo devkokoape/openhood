@@ -21,6 +21,7 @@ import {
   addOffer as doAddOffer,
   updateCollectionLinks as doUpdateLinks,
 } from '../data/mockData'
+import { toast } from 'sonner'
 import { actorId, formatAddress, sameAddress } from '../lib/address'
 import { openConnectWallet } from '../lib/walletUi'
 import {
@@ -232,13 +233,21 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
 
   // Mock-path actions (OpenSea catalog demo only — not on-chain)
   const buy = (nftId: string) => {
-    if (nftId.startsWith(ONCHAIN_COLLECTION_ID)) return false
+    if (nftId.startsWith(ONCHAIN_COLLECTION_ID)) {
+      toast.message('Use Buy on-chain for testnet NFTs')
+      return false
+    }
     if (!actor) {
       openConnectWallet()
       return false
     }
     const ok = doBuy(nftId, actor)
-    if (ok) refresh()
+    if (ok) {
+      refresh()
+      toast.success('Purchase complete', { description: 'NFT transferred to your wallet (demo)' })
+    } else {
+      toast.error('Purchase failed', { description: 'Item may be unlisted or unavailable' })
+    }
     return ok
   }
 
@@ -248,21 +257,47 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       openConnectWallet()
       return 0
     }
+    if (mockIds.length === 0) {
+      toast.message('Select catalog items for demo bulk buy')
+      return 0
+    }
     const n = doBulkBuy(mockIds, actor)
-    if (n > 0) refresh()
+    if (n > 0) {
+      refresh()
+      toast.success(`Bought ${n} NFT${n === 1 ? '' : 's'}`, {
+        description: 'Demo catalog sweep complete',
+      })
+    } else {
+      toast.error('Bulk buy failed')
+    }
     return n
   }
 
   const list = (nftId: string, price: number) => {
-    if (nftId.startsWith(ONCHAIN_COLLECTION_ID)) return false
+    if (nftId.startsWith(ONCHAIN_COLLECTION_ID)) {
+      toast.message('Use on-chain list for testnet NFTs')
+      return false
+    }
     if (!actor) {
       openConnectWallet()
       return false
     }
+    if (!price || price <= 0 || Number.isNaN(price)) {
+      toast.error('Enter a valid price')
+      return false
+    }
     const nft = seedNfts.find((n) => n.id === nftId)
-    if (nft && !sameAddress(nft.owner, actor)) return false
+    if (nft && !sameAddress(nft.owner, actor)) {
+      toast.error('You do not own this NFT')
+      return false
+    }
     const ok = doList(nftId, price)
-    if (ok) refresh()
+    if (ok) {
+      refresh()
+      toast.success('Listed for sale', { description: `${price} ETH (demo catalog)` })
+    } else {
+      toast.error('Could not list NFT')
+    }
     return ok
   }
 
@@ -271,8 +306,20 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       openConnectWallet()
       return 0
     }
-    const n = doMint(slug, actor, quantity)
-    if (n > 0) refresh()
+    const qty = Math.floor(quantity)
+    if (qty < 1) {
+      toast.error('Quantity must be at least 1')
+      return 0
+    }
+    const n = doMint(slug, actor, qty)
+    if (n > 0) {
+      refresh()
+      toast.success(`Minted ${n} NFT${n === 1 ? '' : 's'}`, {
+        description: 'Added to your demo holdings',
+      })
+    } else {
+      toast.error('Mint failed', { description: 'Drop may be sold out or not live' })
+    }
     return n
   }
 
@@ -281,8 +328,15 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       openConnectWallet()
       throw new Error('Connect wallet to make an offer')
     }
+    if (!offer.price || offer.price <= 0 || Number.isNaN(offer.price)) {
+      toast.error('Enter a valid offer price')
+      throw new Error('Invalid offer price')
+    }
     const o = doAddOffer({ ...offer, offerer: actor })
     refresh()
+    toast.success('Offer placed', {
+      description: `${offer.price} ETH · ${offer.type === 'collection' ? 'collection' : 'item'} offer`,
+    })
     return o
   }
 
@@ -300,7 +354,12 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       isFounderOf(col.founder) || (col.slug === 'open-pixels' && connected)
     if (!allowed) return false
     const ok = doUpdateLinks(id, links)
-    if (ok) refresh()
+    if (ok) {
+      refresh()
+      toast.success('Collection updated')
+    } else {
+      toast.error('Could not update collection')
+    }
     return ok
   }
 

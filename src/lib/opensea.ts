@@ -78,6 +78,11 @@ export interface OpenSeaEventItem {
   total_price?: string
 }
 
+/**
+ * API key is read from env at build time (GitHub secret → VITE_OPENSEA_API_KEY).
+ * Prefer server-side proxy in production for stricter key hygiene; Vite embeds
+ * any VITE_* var in the client bundle by design.
+ */
 function apiKey(): string | undefined {
   const k = import.meta.env.VITE_OPENSEA_API_KEY as string | undefined
   return k?.trim() || undefined
