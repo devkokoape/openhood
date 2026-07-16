@@ -1,20 +1,19 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
-  Activity as ActivityIcon,
   Flame,
-  Sparkles,
   Zap,
 } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { FeaturedHero } from '../components/nft/FeaturedHero'
 import { FeaturedCollectionCard } from '../components/nft/FeaturedCollectionCard'
 import { TrendingTable } from '../components/nft/TrendingTable'
-import { NftCard } from '../components/nft/NftCard'
-import { formatPrice, timeAgo } from '../data/mockData'
+import { ListingCard } from '../components/nft/ListingCard'
+import { HomeActivityFeed } from '../components/nft/HomeActivityFeed'
+import { formatPrice } from '../data/mockData'
 import { ONCHAIN_COLLECTION_SLUG, isMarketplaceDeployed } from '../lib/marketplace'
 import clsx from 'clsx'
 
@@ -23,7 +22,6 @@ export function Home() {
   const [params] = useSearchParams()
   const q = (params.get('q') || '').toLowerCase()
   const scrollerRef = useRef<HTMLDivElement>(null)
-  const [listingHover, setListingHover] = useState<string | null>(null)
 
   const featured = useMemo(() => {
     let list = [...collections].sort((a, b) => b.volume24h - a.volume24h)
@@ -38,14 +36,20 @@ export function Home() {
     return list
   }, [collections, q])
 
+  /** OpenSea-style: floor-ish / mid market asks, not only highest price */
   const listed = useMemo(() => {
-    return nfts
-      .filter((n) => n.listed && n.price != null)
-      .sort((a, b) => (b.price ?? 0) - (a.price ?? 0))
-      .slice(0, 12)
-  }, [nfts])
+    const pool = nfts.filter((n) => n.listed && n.price != null && n.price > 0)
+    // Prefer items near collection floor, then fill by price
+    const scored = pool.map((n) => {
+      const col = collections.find((c) => c.id === n.collectionId)
+      const floor = col?.floorPrice || n.price || 1
+      const dist = Math.abs((n.price || 0) - floor) / Math.max(floor, 1e-9)
+      return { n, dist, price: n.price || 0 }
+    })
+    scored.sort((a, b) => a.dist - b.dist || a.price - b.price)
+    return scored.slice(0, 12).map((s) => s.n)
+  }, [nfts, collections])
 
-  const recent = activities.slice(0, 12)
   const totalVol = collections.reduce((s, c) => s + c.volume24h, 0)
 
   const scrollBy = (dir: -1 | 1) => {
@@ -215,199 +219,69 @@ export function Home() {
           </aside>
         </section>
 
-        {/* Notable listings — cooler mosaic */}
+        {/* Notable listings — OpenSea / Blur uniform grid */}
         <section>
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-hood/15 flex items-center justify-center shrink-0">
-                <Sparkles className="w-4 h-4 text-hood" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
-                  Notable listings
-                </h2>
-                <p className="text-[11px] sm:text-xs text-ink-3">
-                  High-signal asks across the market
-                </p>
-              </div>
+          <div className="flex items-end justify-between mb-3 gap-3">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
+                Notable listings
+              </h2>
+              <p className="text-xs sm:text-sm text-ink-3 mt-0.5">
+                Floor-adjacent asks · buy in one click
+              </p>
             </div>
             <Link
               to="/degen/bulk"
-              className="text-xs sm:text-sm font-bold text-hood hover:underline shrink-0"
+              className="text-xs sm:text-sm font-bold text-hood hover:underline shrink-0 inline-flex items-center gap-1"
             >
-              Sweep floors →
+              Sweep
+              <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
           {listed.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-edge py-12 text-center text-sm text-ink-3">
-              No listings right now — check back after the next refresh.
+            <div className="rounded-xl border border-dashed border-edge py-14 text-center text-sm text-ink-3">
+              No active listings right now.
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 sm:gap-2.5">
-              {listed.map((n, i) => {
-                const col = collections.find((c) => c.id === n.collectionId)
-                const featuredSlot = i === 0
-                return (
-                  <div
-                    key={n.id}
-                    className={clsx(
-                      'relative group',
-                      featuredSlot && 'col-span-2 row-span-1 sm:row-span-2'
-                    )}
-                    onMouseEnter={() => setListingHover(n.id)}
-                    onMouseLeave={() => setListingHover(null)}
-                  >
-                    <div
-                      className={clsx(
-                        'h-full rounded-2xl transition-shadow duration-300',
-                        listingHover === n.id && 'shadow-[0_0_0_1px_var(--color-hood),0_12px_40px_rgba(0,200,5,0.12)]'
-                      )}
-                    >
-                      <NftCard nft={n} showCollection compact={!featuredSlot} />
-                    </div>
-                    {featuredSlot && col && (
-                      <div className="pointer-events-none absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-hood text-[#0b0e11] text-[10px] font-bold uppercase tracking-wide shadow">
-                        Spotlight
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
+              {listed.map((n) => (
+                <ListingCard
+                  key={n.id}
+                  nft={n}
+                  collection={collections.find((c) => c.id === n.collectionId)}
+                />
+              ))}
             </div>
           )}
         </section>
 
-        {/* Live activity — timeline style */}
+        {/* Live activity — Blur/OpenSea dense feed */}
         <section>
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-surface-2 border border-edge flex items-center justify-center shrink-0">
-                <ActivityIcon className="w-4 h-4 text-hood" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight flex items-center gap-2">
-                  Live activity
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-hood-muted text-hood text-[10px] font-bold uppercase tracking-wide">
-                    <span className="w-1.5 h-1.5 rounded-full bg-hood animate-pulse" />
-                    Feed
-                  </span>
-                </h2>
-                <p className="text-[11px] sm:text-xs text-ink-3">
-                  Sales, listings & mints as they land
-                </p>
-              </div>
+          <div className="flex items-end justify-between mb-3 gap-3">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
+                Activity
+              </h2>
+              <p className="text-xs sm:text-sm text-ink-3 mt-0.5">
+                Real-time sales, lists & mints
+              </p>
             </div>
             <Link
               to="/activity"
-              className="text-xs sm:text-sm font-bold text-hood hover:underline shrink-0"
+              className="text-xs sm:text-sm font-bold text-hood hover:underline shrink-0 inline-flex items-center gap-1"
             >
-              Full feed →
+              View all
+              <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
-          <div className="rounded-2xl border border-edge bg-surface overflow-hidden">
-            {/* Desktop header */}
-            <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-ink-3 border-b border-edge bg-surface-2/50">
-              <div className="col-span-2">Event</div>
-              <div className="col-span-4">Item</div>
-              <div className="col-span-2 text-right">Price</div>
-              <div className="col-span-2">From</div>
-              <div className="col-span-2 text-right">When</div>
-            </div>
-
-            {recent.length === 0 ? (
-              <p className="py-12 text-center text-sm text-ink-3">No recent activity yet.</p>
-            ) : (
-              <div className="divide-y divide-[var(--color-border)]">
-                {recent.map((a) => {
-                  const col = collections.find((c) => c.id === a.collectionId)
-                  const nft = a.nftId ? nfts.find((n) => n.id === a.nftId) : undefined
-                  const typeColor =
-                    a.type === 'sale'
-                      ? 'text-hood bg-hood-muted'
-                      : a.type === 'listing'
-                        ? 'text-ink bg-surface-3'
-                        : a.type === 'mint'
-                          ? 'text-hood bg-hood-muted'
-                          : a.type === 'bid' || a.type === 'offer'
-                            ? 'text-[var(--color-bid)] bg-[rgba(81,133,255,0.12)]'
-                            : 'text-ink-2 bg-surface-2'
-
-                  return (
-                    <div
-                      key={a.id}
-                      className="grid grid-cols-1 sm:grid-cols-12 gap-1 sm:gap-2 px-3 sm:px-4 py-3 hover:bg-surface-2/60 transition-colors items-center"
-                    >
-                      <div className="sm:col-span-2 flex items-center gap-2">
-                        <span
-                          className={clsx(
-                            'px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide',
-                            typeColor
-                          )}
-                        >
-                          {a.type.replace('_', ' ')}
-                        </span>
-                      </div>
-                      <div className="sm:col-span-4 flex items-center gap-2.5 min-w-0">
-                        {(nft?.image || col?.image) && (
-                          <img
-                            src={nft?.image || col?.image}
-                            alt=""
-                            className="w-9 h-9 rounded-lg object-cover shrink-0 ring-1 ring-edge"
-                          />
-                        )}
-                        <div className="min-w-0">
-                          {nft && a.nftId ? (
-                            <Link
-                              to={`/nft/${a.nftId}`}
-                              className="text-sm font-semibold text-ink hover:text-hood truncate block"
-                            >
-                              {nft.name}
-                            </Link>
-                          ) : col ? (
-                            <Link
-                              to={`/collection/${col.slug}`}
-                              className="text-sm font-semibold text-ink hover:text-hood truncate block"
-                            >
-                              {col.name}
-                            </Link>
-                          ) : (
-                            <span className="text-sm text-ink-3">—</span>
-                          )}
-                          {col && nft && (
-                            <div className="text-[11px] text-ink-3 truncate">{col.name}</div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="sm:col-span-2 sm:text-right">
-                        {a.price != null ? (
-                          <span className="text-sm font-bold tabular-nums text-ink">
-                            {a.price === 0 && a.type === 'mint' ? (
-                              <span className="text-hood text-xs">Free</span>
-                            ) : (
-                              <>
-                                {formatPrice(a.price)}{' '}
-                                <span className="text-hood text-[10px]">ETH</span>
-                              </>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-ink-3 text-sm">—</span>
-                        )}
-                      </div>
-                      <div className="sm:col-span-2 text-[11px] font-mono text-ink-3 truncate hidden sm:block">
-                        {a.from}
-                      </div>
-                      <div className="sm:col-span-2 sm:text-right text-[11px] text-ink-3 tabular-nums">
-                        {timeAgo(a.timestamp)}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+          <HomeActivityFeed
+            activities={activities}
+            collections={collections}
+            nfts={nfts}
+            limit={16}
+          />
         </section>
       </div>
     </div>
