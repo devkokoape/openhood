@@ -78,6 +78,12 @@ npm run dev
 
 Open the URL shown in the terminal (usually `http://localhost:5173`).
 
+## GitHub Pages
+
+Live site (after Actions deploy): **https://devkokoape.github.io/openhood/**
+
+Deploys automatically on every push to `main` via `.github/workflows/deploy.yml`.
+
 ## Demo notes
 
 - Wallet is mocked as connected (`0xOpenHood…7a3f`)
