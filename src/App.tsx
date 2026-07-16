@@ -22,7 +22,7 @@ export default function App() {
     <ThemeProvider>
       <WalletProvider>
         <MarketplaceProvider>
-          <BrowserRouter>
+          <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '') || undefined}>
             <Routes>
               <Route element={<Layout />}>
                 <Route index element={<Home />} />
