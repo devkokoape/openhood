@@ -163,7 +163,7 @@ export function FeaturedHero({ collections }: { collections: Collection[] }) {
               onClick={() => setIndex(i)}
               className={clsx(
                 'h-1 rounded-full transition-all pointer-events-auto cursor-pointer',
-                i === index ? 'w-8 bg-hood' : 'w-3 bg-white/35 hover:bg-white/55'
+                i === safeIndex ? 'w-8 bg-hood' : 'w-3 bg-white/35 hover:bg-white/55'
               )}
               aria-label={`Go to ${c.name}`}
             />
