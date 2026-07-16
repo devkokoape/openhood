@@ -15,7 +15,12 @@ import {
   parseOnChainTokenId,
   weiToEth,
 } from '../lib/marketplace'
-import { useMarketFee, useMarketplaceTx } from '../hooks/useOnChainMarket'
+import {
+  minBidEth,
+  useMarketFee,
+  useMarketplaceTx,
+} from '../hooks/useOnChainMarket'
+import { getCachedOpenSeaNft } from '../lib/opensea'
 import type { Hex } from 'viem'
 
 export function NftDetailPage() {
@@ -43,10 +48,12 @@ export function NftDetailPage() {
     createAuctionOnChain,
     bidOnChain,
     settleOnChain,
+    cancelAuctionOnChain,
     isPending,
     isConfirming,
     error: txError,
     reset: resetTx,
+    waitReceipt,
   } = useMarketplaceTx()
   const { feeBps } = useMarketFee()
 
@@ -64,7 +71,8 @@ export function NftDetailPage() {
     pending?: boolean
   } | null>(null)
 
-  const nft = nfts.find((n) => n.id === id)
+  const nft =
+    nfts.find((n) => n.id === id) || (id ? getCachedOpenSeaNft(id) : undefined)
   const collection = nft ? collections.find((c) => c.id === nft.collectionId) : undefined
   const itemOffers = offers.filter((o) => o.nftId === nft?.id)
   const itemActivity = activities.filter((a) => a.nftId === nft?.id)
@@ -94,17 +102,19 @@ export function NftDetailPage() {
     showToast(`${label}… confirm in wallet`, undefined, true)
     try {
       const h = await fn()
-      showToast(`${label} submitted`, h, true)
-      // wait a bit then refresh chain state
-      setTimeout(() => {
-        void refreshChain()
-        showToast(`${label} confirmed`, h, false)
-      }, 4000)
+      showToast(`${label} submitted — waiting for confirmation`, h, true)
+      try {
+        await waitReceipt(h)
+      } catch {
+        // still refresh; user can check explorer
+      }
+      await refreshChain()
+      showToast(`${label} confirmed`, h, false)
       return h
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transaction failed'
-      if (/reject|denied|cancel/i.test(msg)) showToast('Rejected in wallet')
-      else showToast(msg.slice(0, 120))
+      if (/reject|denied|cancel|user rejected/i.test(msg)) showToast('Rejected in wallet')
+      else showToast(msg.slice(0, 140))
       return null
     }
   }
@@ -137,6 +147,10 @@ export function NftDetailPage() {
     if (isOnChain) {
       if (!chainListing) {
         showToast('No active on-chain listing')
+        return
+      }
+      if (isOwner) {
+        showToast('You cannot buy your own listing')
         return
       }
       await runTx('Buy', () => buyOnChain(chainListing.listingId, chainListing.price))
@@ -179,8 +193,28 @@ export function NftDetailPage() {
     )
   }
 
+  const auctionEnded =
+    chainAuction && Number(chainAuction.endTime) * 1000 < Date.now()
+
+  const minBid = chainAuction ? minBidEth(chainAuction) : '0'
+  const canCancelAuction =
+    Boolean(chainAuction) &&
+    isOwner &&
+    !auctionEnded &&
+    chainAuction!.highestBid === 0n
+
   const handleBid = async () => {
     if (!chainAuction) return
+    const amount = parseFloat(bidAmount)
+    if (!amount || amount <= 0 || Number.isNaN(amount)) {
+      showToast('Enter a valid bid amount')
+      return
+    }
+    const min = parseFloat(minBid)
+    if (amount + 1e-18 < min) {
+      showToast(`Bid must be at least ${minBid} ETH`)
+      return
+    }
     setBidOpen(false)
     await runTx('Place bid', () => bidOnChain(chainAuction.auctionId, bidAmount))
   }
@@ -190,14 +224,12 @@ export function NftDetailPage() {
     await runTx('Settle auction', () => settleOnChain(chainAuction.auctionId))
   }
 
-  const auctionEnded =
-    chainAuction && Number(chainAuction.endTime) * 1000 < Date.now()
-
-  const minBidEth = chainAuction
-    ? chainAuction.highestBid === 0n
-      ? weiToEth(chainAuction.reservePrice)
-      : weiToEth(chainAuction.highestBid + (chainAuction.highestBid * 5n) / 100n)
-    : '0'
+  const handleCancelAuction = async () => {
+    if (!chainAuction) return
+    await runTx('Cancel auction', () =>
+      cancelAuctionOnChain(chainAuction.auctionId)
+    )
+  }
 
   return (
     <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 animate-fade-in">
@@ -277,11 +309,21 @@ export function NftDetailPage() {
                     size="sm"
                     disabled={busy}
                     onClick={() => {
-                      setBidAmount(minBidEth)
+                      setBidAmount(minBid)
                       setBidOpen(true)
                     }}
                   >
                     Place bid
+                  </Button>
+                )}
+                {canCancelAuction && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void handleCancelAuction()}
+                  >
+                    Cancel auction
                   </Button>
                 )}
                 {auctionEnded && (
@@ -549,12 +591,12 @@ export function NftDetailPage() {
       >
         <label className="block">
           <span className="text-xs font-medium text-ink-3 uppercase">
-            Bid amount (ETH) · min {minBidEth}
+            Bid amount (ETH) · min {minBid}
           </span>
           <input
             type="number"
             step="any"
-            min={minBidEth}
+            min={minBid}
             value={bidAmount}
             onChange={(e) => setBidAmount(e.target.value)}
             className="mt-1 w-full h-11 px-3 rounded-xl bg-surface-2 border border-edge text-ink focus:outline-none focus:border-hood"

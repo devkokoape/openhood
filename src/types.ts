@@ -53,6 +53,13 @@ export interface Nft {
   lastSale?: number
   rarityRank?: number
   traits: { trait_type: string; value: string }[]
+  /** English auction (on-chain) */
+  inAuction?: boolean
+  /** Reserve or current high bid for display */
+  auctionPrice?: number
+  auctionHighBid?: number
+  auctionReserve?: number
+  auctionEndsAt?: string
 }
 
 export interface Offer {
@@ -106,6 +113,8 @@ export interface MintDrop {
   endsAt?: string
   chain: string
   founder: string
+  /** Free mint on Robinhood testnet MockERC721 */
+  onChain?: boolean
 }
 
 export interface UserProfile {

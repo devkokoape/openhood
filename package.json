@@ -13,7 +13,8 @@
     "contracts:deploy:local": "hardhat run scripts/deploy.cjs",
     "contracts:deploy:testnet": "hardhat run scripts/deploy.cjs --network robinhoodTestnet",
     "contracts:smoke:testnet": "hardhat run scripts/smoke-test.cjs --network robinhoodTestnet",
-    "contracts:deploy:wait": "node scripts/deploy-when-funded.cjs"
+    "contracts:deploy:wait": "node scripts/deploy-when-funded.cjs",
+    "opensea:refresh": "node scripts/refresh-opensea-snapshot.cjs"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.2.0",

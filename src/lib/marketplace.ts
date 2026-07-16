@@ -13,6 +13,8 @@ const DEPLOYED = {
   chainId: 46630,
   marketplace: '0xEc164cCA500E761eaE1e886ee7D347212409f619' as Address,
   nft: '0x88e3Dd568bF102499B332124B4D78472861641ed' as Address,
+  /** First marketplace/NFT deploy block — used for event indexing */
+  deployBlock: 90_672_000n,
 }
 
 const envMarket = import.meta.env.VITE_MARKETPLACE_ADDRESS as string | undefined
@@ -33,6 +35,11 @@ export const MARKETPLACE_EXPLORER =
 
 export const ONCHAIN_COLLECTION_ID = 'onchain-openhood-demo'
 export const ONCHAIN_COLLECTION_SLUG = 'openhood-testnet'
+
+/** Block to start getLogs from (deployment). Override with VITE_DEPLOY_BLOCK. */
+export const MARKETPLACE_DEPLOY_BLOCK = BigInt(
+  import.meta.env.VITE_DEPLOY_BLOCK || String(DEPLOYED.deployBlock)
+)
 
 export function isMarketplaceDeployed(): boolean {
   return Boolean(MARKETPLACE_ADDRESS && MARKETPLACE_ADDRESS.startsWith('0x'))

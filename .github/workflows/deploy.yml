@@ -36,6 +36,8 @@ jobs:
           VITE_MARKETPLACE_ADDRESS: '0xEc164cCA500E761eaE1e886ee7D347212409f619'
           VITE_DEMO_NFT_ADDRESS: '0x88e3Dd568bF102499B332124B4D78472861641ed'
           VITE_CHAIN_ID: '46630'
+          # Free key: https://docs.opensea.io/reference/api-keys — required for live OpenSea in the browser
+          VITE_OPENSEA_API_KEY: ${{ secrets.OPENSEA_API_KEY }}
         run: npm run build
 
       # SPA fallback for client-side routes

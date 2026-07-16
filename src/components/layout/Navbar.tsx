@@ -10,9 +10,10 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../../context/ThemeContext'
+import { useMarketplace } from '../../context/MarketplaceContext'
 import { ConnectWallet } from '../wallet/ConnectWallet'
 
 const links = [
@@ -25,14 +26,26 @@ const links = [
 
 export function Navbar() {
   const { theme, toggle } = useTheme()
+  const { openSeaStatus } = useMarketplace()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [now, setNow] = useState(() => Date.now())
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (q.trim()) navigate(`/collections?q=${encodeURIComponent(q.trim())}`)
   }
+
+  const liveAge =
+    openSeaStatus.lastOkAt != null
+      ? Math.max(0, Math.round((now - openSeaStatus.lastOkAt) / 1000))
+      : null
 
   return (
     <header className="sticky top-0 z-40 border-b border-edge bg-surface/80 backdrop-blur-xl">
@@ -45,6 +58,40 @@ export function Navbar() {
             Open<span className="text-hood">Hood</span>
           </span>
         </Link>
+
+        {/* Live OpenSea pulse */}
+        <div
+          className={clsx(
+            'hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border',
+            openSeaStatus.live
+              ? 'border-hood/40 bg-hood-muted text-hood'
+              : 'border-edge bg-surface-2 text-ink-3'
+          )}
+          title={
+            openSeaStatus.lastError ||
+            (openSeaStatus.live
+              ? 'OpenSea Robinhood stats refreshing every 1s'
+              : 'Waiting for OpenSea — set VITE_OPENSEA_API_KEY for production live data')
+          }
+        >
+          <span
+            className={clsx(
+              'w-1.5 h-1.5 rounded-full',
+              openSeaStatus.live
+                ? 'bg-hood animate-pulse'
+                : openSeaStatus.refreshing
+                  ? 'bg-amber-400 animate-pulse'
+                  : 'bg-ink-3'
+            )}
+          />
+          {openSeaStatus.live
+            ? liveAge != null && liveAge < 3
+              ? 'Live OpenSea'
+              : `OpenSea ${liveAge ?? '—'}s`
+            : openSeaStatus.refreshing
+              ? 'Syncing…'
+              : 'OpenSea offline'}
+        </div>
 
         <nav className="hidden md:flex items-center gap-0.5 ml-1">
           {links.map((l) => (

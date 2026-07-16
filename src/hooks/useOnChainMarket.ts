@@ -7,6 +7,7 @@ import {
   useWaitForTransactionReceipt,
   useChainId,
   useSwitchChain,
+  usePublicClient,
 } from 'wagmi'
 import { type Address, type Hex, zeroAddress } from 'viem'
 import {
@@ -24,9 +25,9 @@ import {
   formatWeiPrice,
   isMarketplaceDeployed,
   onChainNftId,
+  weiToEth,
 } from '../lib/marketplace'
 import { openConnectWallet } from '../lib/walletUi'
-import { formatAddress } from '../lib/address'
 import type { Collection, Nft } from '../types'
 
 const MAX_SCAN = 64
@@ -148,7 +149,7 @@ export function useOnChainCollectionMeta(): Collection {
       name: 'OpenHood Testnet',
       slug: ONCHAIN_COLLECTION_SLUG,
       description:
-        'Live demo NFTs on Robinhood testnet. List, buy, and auction on-chain with a 2.5% protocol fee.',
+        'Live demo NFTs on Robinhood testnet. List, buy, and auction on-chain with a 2.5% protocol fee. Mint free, list for sale, or run English auctions.',
       image: `https://api.dicebear.com/7.x/shapes/svg?seed=openhood&backgroundColor=00c805`,
       banner: `https://api.dicebear.com/7.x/shapes/svg?seed=openhood-banner&backgroundColor=0b0e11`,
       floorPrice: 0,
@@ -156,7 +157,8 @@ export function useOnChainCollectionMeta(): Collection {
       volumeTotal: 0,
       items: 0,
       owners: 0,
-      founder: formatAddress(MARKETPLACE_ADDRESS),
+      // Deployer / fee recipient (not the marketplace escrow)
+      founder: '0xFd64a84cEfc471Ec7dE84a164D57eF311CCe5Fc6',
       website: MARKETPLACE_EXPLORER,
       verified: true,
       source: 'demo',
@@ -174,21 +176,21 @@ export function useOnChainInventory() {
     address: DEMO_NFT_ADDRESS,
     abi: mockErc721Abi,
     functionName: 'nextTokenId',
-    query: { enabled, refetchInterval: 15_000 },
+    query: { enabled, refetchInterval: 2_000 },
   })
 
   const { data: nextListingId, refetch: refetchListings } = useReadContract({
     address: MARKETPLACE_ADDRESS,
     abi: marketplaceAbi,
     functionName: 'nextListingId',
-    query: { enabled, refetchInterval: 15_000 },
+    query: { enabled, refetchInterval: 2_000 },
   })
 
   const { data: nextAuctionId, refetch: refetchAuctions } = useReadContract({
     address: MARKETPLACE_ADDRESS,
     abi: marketplaceAbi,
     functionName: 'nextAuctionId',
-    query: { enabled, refetchInterval: 15_000 },
+    query: { enabled, refetchInterval: 2_000 },
   })
 
   const tokenCount =
@@ -231,19 +233,19 @@ export function useOnChainInventory() {
   const { data: owners, refetch: refetchOwners } = useReadContracts({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     contracts: ownerCalls as any,
-    query: { enabled: ownerCalls.length > 0, refetchInterval: 15_000 },
+    query: { enabled: ownerCalls.length > 0, refetchInterval: 2_000 },
   })
 
   const { data: listingRaws, refetch: refetchListingRaws } = useReadContracts({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     contracts: listingCalls as any,
-    query: { enabled: listingCalls.length > 0, refetchInterval: 15_000 },
+    query: { enabled: listingCalls.length > 0, refetchInterval: 2_000 },
   })
 
   const { data: auctionRaws, refetch: refetchAuctionRaws } = useReadContracts({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     contracts: auctionCalls as any,
-    query: { enabled: auctionCalls.length > 0, refetchInterval: 15_000 },
+    query: { enabled: auctionCalls.length > 0, refetchInterval: 2_000 },
   })
 
   const listings = useMemo(() => {
@@ -265,8 +267,18 @@ export function useOnChainInventory() {
     auctionRaws.forEach((r, i) => {
       if (r.status !== 'success' || r.result == null) return
       const decoded = asAuction(r.result, BigInt(i + 1))
-      if (!decoded?.active || decoded.settled) return
-      if (decoded.nft.toLowerCase() !== DEMO_NFT_ADDRESS.toLowerCase()) return
+      if (!decoded) return
+      // Treat live auctions: active and not settled (ended-but-unsettled still show)
+      if (decoded.settled || !decoded.active) return
+      const nftAddr = (decoded.nft || '').toLowerCase()
+      // Accept our demo NFT; also accept if address empty (decode edge case) when tokenId present
+      if (
+        nftAddr &&
+        nftAddr !== DEMO_NFT_ADDRESS.toLowerCase() &&
+        nftAddr !== zeroAddress
+      ) {
+        return
+      }
       out.push(decoded)
     })
     return out
@@ -287,32 +299,61 @@ export function useOnChainInventory() {
   const nfts: Nft[] = useMemo(() => {
     if (tokenCount <= 0) return []
     const list: Nft[] = []
+    const marketLower = MARKETPLACE_ADDRESS.toLowerCase()
     for (let i = 1; i <= tokenCount; i++) {
       const ownerResult = owners?.[i - 1]
-      const owner =
+      const chainOwner =
         ownerResult?.status === 'success'
           ? (ownerResult.result as Address)
           : zeroAddress
-      if (!owner || owner === zeroAddress) continue
+      if (!chainOwner || chainOwner === zeroAddress) continue
 
       const L = listingByToken.get(String(i))
       const A = auctionByToken.get(String(i))
+      // Marketplace escrows NFTs on list/auction — show seller as logical owner
+      // so cancel/list/profile ownership checks work.
+      let logicalOwner = chainOwner
+      if (L?.active && L.seller) logicalOwner = L.seller
+      else if (A?.active && !A.settled && A.seller) logicalOwner = A.seller
+      else if (chainOwner.toLowerCase() === marketLower) {
+        if (L?.seller) logicalOwner = L.seller
+        else if (A?.seller) logicalOwner = A.seller
+      }
+
+      const inAuction = Boolean(A?.active && !A.settled)
+      const reserve = A ? formatWeiPrice(A.reservePrice) : undefined
+      const highBid =
+        A && A.highestBid > 0n ? formatWeiPrice(A.highestBid) : undefined
+      // Display price: high bid if any, else reserve for auctions; listing price for fixed
+      const auctionDisplay =
+        inAuction && (highBid != null || reserve != null)
+          ? (highBid ?? reserve)
+          : undefined
+
       list.push({
         id: onChainNftId(i),
         tokenId: i,
         name: `OpenHood Demo #${i}`,
         collectionId: ONCHAIN_COLLECTION_ID,
         image: `https://api.dicebear.com/7.x/shapes/svg?seed=oh-${i}&backgroundColor=00c805,0b0e11`,
-        owner: owner.toLowerCase(),
+        owner: logicalOwner.toLowerCase(),
         listed: Boolean(L?.active),
-        price: L ? formatWeiPrice(L.price) : undefined,
+        price: L?.active ? formatWeiPrice(L.price) : auctionDisplay,
+        inAuction,
+        auctionPrice: auctionDisplay,
+        auctionHighBid: highBid,
+        auctionReserve: reserve,
+        auctionEndsAt:
+          inAuction && A
+            ? new Date(Number(A.endTime) * 1000).toISOString()
+            : undefined,
         traits: [
           { trait_type: 'Network', value: 'Robinhood Testnet' },
           { trait_type: 'Standard', value: 'ERC-721' },
           { trait_type: 'Token ID', value: String(i) },
           {
             trait_type: 'Status',
-            value: A ? 'In auction' : L?.active ? 'Listed' : 'Unlisted',
+            value: inAuction ? 'In auction' : L?.active ? 'Listed' : 'Unlisted',
           },
         ],
       })
@@ -322,12 +363,21 @@ export function useOnChainInventory() {
 
   const collectionPatch = useMemo(() => {
     const floors = listings.map((l) => formatWeiPrice(l.price)).filter((p) => p > 0)
+    // Include auction reserves so floor isn't empty when only auctions are live
+    for (const n of nfts) {
+      if (n.inAuction && n.auctionReserve != null && n.auctionReserve > 0) {
+        floors.push(n.auctionReserve)
+      }
+    }
     const floor = floors.length ? Math.min(...floors) : 0
     const ownersSet = new Set(nfts.map((n) => n.owner.toLowerCase()))
+    const marketCount = nfts.filter((n) => n.listed || n.inAuction).length
     return {
       floorPrice: floor,
       items: nfts.length,
       owners: ownersSet.size,
+      listedPct: nfts.length > 0 ? +((marketCount / nfts.length) * 100).toFixed(1) : 0,
+      // volume filled by useOnChainActivity in MarketplaceContext
       volume24h: 0,
       volumeTotal: 0,
     }
@@ -364,9 +414,22 @@ export function useOnChainInventory() {
   }
 }
 
+/** Min bid matching OpenHoodMarketplace.bid (+5%, min +1 wei). */
+export function minBidWei(auction: ChainAuction): bigint {
+  if (auction.highestBid === 0n) return auction.reservePrice
+  let min = auction.highestBid + (auction.highestBid * 5n) / 100n
+  if (min === auction.highestBid) min = auction.highestBid + 1n
+  return min
+}
+
+export function minBidEth(auction: ChainAuction): string {
+  return weiToEth(minBidWei(auction))
+}
+
 export function useMarketplaceTx() {
   const { address, isConnected } = useAccount()
   const ensureChain = useEnsureMarketChain()
+  const publicClient = usePublicClient({ chainId: MARKETPLACE_CHAIN_ID })
   const { writeContractAsync, data: hash, isPending, error, reset } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
     hash,
@@ -384,40 +447,83 @@ export function useMarketplaceTx() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const write = writeContractAsync as (args: any) => Promise<Hex>
 
-  const approveNft = useCallback(
-    async (tokenId: bigint) =>
-      run(() =>
-        write({
-          address: DEMO_NFT_ADDRESS,
-          abi: mockErc721Abi,
-          functionName: 'approve',
-          args: [MARKETPLACE_ADDRESS, tokenId],
-          chainId: MARKETPLACE_CHAIN_ID,
-        })
-      ),
-    [run, write]
+  const waitReceipt = useCallback(
+    async (txHash: Hex) => {
+      if (!publicClient) throw new Error('RPC client unavailable')
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+      if (receipt.status === 'reverted') throw new Error('Transaction reverted')
+      return receipt
+    },
+    [publicClient]
+  )
+
+  /** Approve marketplace for token if needed; wait for confirmation before listing. */
+  const ensureApproved = useCallback(
+    async (tokenId: bigint) => {
+      if (!address) {
+        openConnectWallet()
+        throw new Error('Connect wallet')
+      }
+      if (!publicClient) throw new Error('RPC client unavailable')
+      await ensureChain()
+
+      const approved = (await publicClient.readContract({
+        address: DEMO_NFT_ADDRESS,
+        abi: mockErc721Abi,
+        functionName: 'getApproved',
+        args: [tokenId],
+      })) as Address
+
+      const operatorOk = (await publicClient.readContract({
+        address: DEMO_NFT_ADDRESS,
+        abi: mockErc721Abi,
+        functionName: 'isApprovedForAll',
+        args: [address, MARKETPLACE_ADDRESS],
+      })) as boolean
+
+      if (
+        operatorOk ||
+        approved.toLowerCase() === MARKETPLACE_ADDRESS.toLowerCase()
+      ) {
+        return null
+      }
+
+      const approveHash = await write({
+        address: DEMO_NFT_ADDRESS,
+        abi: mockErc721Abi,
+        functionName: 'approve',
+        args: [MARKETPLACE_ADDRESS, tokenId],
+        chainId: MARKETPLACE_CHAIN_ID,
+      })
+      await waitReceipt(approveHash)
+      return approveHash
+    },
+    [address, ensureChain, publicClient, waitReceipt, write]
   )
 
   const listOnChain = useCallback(
     async (tokenId: number, priceEth: string) => {
       const tid = BigInt(tokenId)
-      await approveNft(tid)
+      const price = ethToWei(priceEth)
+      if (price <= 0n) throw new Error('Price must be greater than 0')
+      await ensureApproved(tid)
       return run(() =>
         write({
           address: MARKETPLACE_ADDRESS,
           abi: marketplaceAbi,
           functionName: 'list',
-          args: [DEMO_NFT_ADDRESS, tid, ethToWei(priceEth)],
+          args: [DEMO_NFT_ADDRESS, tid, price],
           chainId: MARKETPLACE_CHAIN_ID,
         })
       )
     },
-    [approveNft, run, write]
+    [ensureApproved, run, write]
   )
 
   const buyOnChain = useCallback(
-    async (listingId: bigint, priceWei: bigint) =>
-      run(() =>
+    async (listingId: bigint, priceWei: bigint) => {
+      if (priceWei <= 0n) throw new Error('Invalid listing price')
+      return run(() =>
         write({
           address: MARKETPLACE_ADDRESS,
           abi: marketplaceAbi,
@@ -426,7 +532,8 @@ export function useMarketplaceTx() {
           value: priceWei,
           chainId: MARKETPLACE_CHAIN_ID,
         })
-      ),
+      )
+    },
     [run, write]
   )
 
@@ -447,32 +554,38 @@ export function useMarketplaceTx() {
   const createAuctionOnChain = useCallback(
     async (tokenId: number, reserveEth: string, durationSec: number) => {
       const tid = BigInt(tokenId)
-      await approveNft(tid)
+      const reserve = ethToWei(reserveEth)
+      if (reserve <= 0n) throw new Error('Reserve must be greater than 0')
+      if (durationSec < 60) throw new Error('Auction must last at least 60 seconds')
+      await ensureApproved(tid)
       return run(() =>
         write({
           address: MARKETPLACE_ADDRESS,
           abi: marketplaceAbi,
           functionName: 'createAuction',
-          args: [DEMO_NFT_ADDRESS, tid, ethToWei(reserveEth), BigInt(durationSec)],
+          args: [DEMO_NFT_ADDRESS, tid, reserve, BigInt(durationSec)],
           chainId: MARKETPLACE_CHAIN_ID,
         })
       )
     },
-    [approveNft, run, write]
+    [ensureApproved, run, write]
   )
 
   const bidOnChain = useCallback(
-    async (auctionId: bigint, amountEth: string) =>
-      run(() =>
+    async (auctionId: bigint, amountEth: string) => {
+      const value = ethToWei(amountEth)
+      if (value <= 0n) throw new Error('Bid must be greater than 0')
+      return run(() =>
         write({
           address: MARKETPLACE_ADDRESS,
           abi: marketplaceAbi,
           functionName: 'bid',
           args: [auctionId],
-          value: ethToWei(amountEth),
+          value,
           chainId: MARKETPLACE_CHAIN_ID,
         })
-      ),
+      )
+    },
     [run, write]
   )
 
@@ -490,21 +603,50 @@ export function useMarketplaceTx() {
     [run, write]
   )
 
-  const mintDemo = useCallback(async () => {
-    if (!address) {
-      openConnectWallet()
-      throw new Error('Connect wallet')
-    }
-    return run(() =>
-      write({
-        address: DEMO_NFT_ADDRESS,
-        abi: mockErc721Abi,
-        functionName: 'mint',
-        args: [address],
-        chainId: MARKETPLACE_CHAIN_ID,
-      })
-    )
-  }, [address, run, write])
+  const cancelAuctionOnChain = useCallback(
+    async (auctionId: bigint) =>
+      run(() =>
+        write({
+          address: MARKETPLACE_ADDRESS,
+          abi: marketplaceAbi,
+          functionName: 'cancelAuction',
+          args: [auctionId],
+          chainId: MARKETPLACE_CHAIN_ID,
+        })
+      ),
+    [run, write]
+  )
+
+  const mintDemo = useCallback(
+    async (quantity = 1) => {
+      if (!address) {
+        openConnectWallet()
+        throw new Error('Connect wallet')
+      }
+      const qty = Math.max(1, Math.min(20, Math.floor(quantity)))
+      if (qty === 1) {
+        return run(() =>
+          write({
+            address: DEMO_NFT_ADDRESS,
+            abi: mockErc721Abi,
+            functionName: 'mint',
+            args: [address],
+            chainId: MARKETPLACE_CHAIN_ID,
+          })
+        )
+      }
+      return run(() =>
+        write({
+          address: DEMO_NFT_ADDRESS,
+          abi: mockErc721Abi,
+          functionName: 'mintBatch',
+          args: [address, BigInt(qty)],
+          chainId: MARKETPLACE_CHAIN_ID,
+        })
+      )
+    },
+    [address, run, write]
+  )
 
   return {
     address,
@@ -515,6 +657,7 @@ export function useMarketplaceTx() {
     createAuctionOnChain,
     bidOnChain,
     settleOnChain,
+    cancelAuctionOnChain,
     mintDemo,
     hash,
     isPending,
@@ -522,5 +665,6 @@ export function useMarketplaceTx() {
     isSuccess,
     error,
     reset,
+    waitReceipt,
   }
 }

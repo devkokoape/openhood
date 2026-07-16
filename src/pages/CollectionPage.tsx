@@ -38,6 +38,7 @@ import {
 import type { ActivityType } from '../types'
 import { ONCHAIN_COLLECTION_ID, parseOnChainTokenId } from '../lib/marketplace'
 import { useMarketplaceTx } from '../hooks/useOnChainMarket'
+import { useOpenSeaCollectionNfts } from '../hooks/useOpenSeaCollectionNfts'
 import { TxToast } from '../components/wallet/TxToast'
 
 type SortKey = 'price_asc' | 'price_desc' | 'id' | 'rarity_asc' | 'rarity_desc'
@@ -93,10 +94,12 @@ export function CollectionPage() {
     connected,
     connect,
     isFounderOf,
+    isOwnerOf,
     actor,
     chainEnabled,
     listingByToken,
     refreshChain,
+    openSeaStatus,
   } = useMarketplace()
   const [tab, setTab] = useState('items')
   const [offerOpen, setOfferOpen] = useState(false)
@@ -119,7 +122,7 @@ export function CollectionPage() {
     null
   )
   const [activityFilter, setActivityFilter] = useState('all')
-  const { buyOnChain, mintDemo, isPending, isConfirming } = useMarketplaceTx()
+  const { buyOnChain, mintDemo, isPending, isConfirming, waitReceipt } = useMarketplaceTx()
 
   const collection = collections.find((c) => c.slug === slug || c.id === slug)
   const isOnChainCol = collection?.id === ONCHAIN_COLLECTION_ID && chainEnabled
@@ -154,10 +157,21 @@ export function CollectionPage() {
     setSelected(new Set())
   }, [collection?.id, sweepMode])
 
-  const collectionNfts = useMemo(
-    () => (collection ? nfts.filter((n) => n.collectionId === collection.id) : []),
-    [collection, nfts]
+  const isOpenSeaCol = collection?.source === 'opensea'
+  const openSeaNfts = useOpenSeaCollectionNfts(
+    isOpenSeaCol ? collection?.slug : undefined,
+    isOpenSeaCol ? collection?.id : undefined,
+    Boolean(isOpenSeaCol && collection)
   )
+
+  const collectionNfts = useMemo(() => {
+    if (!collection) return []
+    // Live OpenSea catalog (full paginated) — not the old 18 mock stubs
+    if (collection.source === 'opensea') {
+      return openSeaNfts.nfts
+    }
+    return nfts.filter((n) => n.collectionId === collection.id)
+  }, [collection, nfts, openSeaNfts.nfts])
 
   const traitStats = useMemo(() => buildTraitStats(collectionNfts), [collectionNfts])
 
@@ -169,8 +183,12 @@ export function CollectionPage() {
   const items = useMemo(() => {
     let list = filterByTraits(collectionNfts, filters)
     list = [...list]
-    if (sort === 'price_asc') list.sort((a, b) => (a.price ?? 1e9) - (b.price ?? 1e9))
-    if (sort === 'price_desc') list.sort((a, b) => (b.price ?? 0) - (a.price ?? 0))
+    const sortPrice = (n: typeof list[0]) =>
+      n.price ?? n.auctionPrice ?? (n.inAuction ? 0 : 1e9)
+    if (sort === 'price_asc')
+      list.sort((a, b) => sortPrice(a) - sortPrice(b))
+    if (sort === 'price_desc')
+      list.sort((a, b) => (b.price ?? b.auctionPrice ?? 0) - (a.price ?? a.auctionPrice ?? 0))
     if (sort === 'id') list.sort((a, b) => a.tokenId - b.tokenId)
     if (sort === 'rarity_asc')
       list.sort(
@@ -182,21 +200,25 @@ export function CollectionPage() {
         (a, b) =>
           (rarityMap.get(b.id)?.rarityRank ?? 0) - (rarityMap.get(a.id)?.rarityRank ?? 0)
       )
+    // Surface auctions near the top when sorting by id (default discovery)
+    if (sort === 'id') {
+      list.sort((a, b) => Number(b.inAuction) - Number(a.inAuction) || a.tokenId - b.tokenId)
+    }
     return list
   }, [collectionNfts, filters, sort, rarityMap])
 
   const sweepable = useMemo(() => {
     return items
-      .filter(
-        (n) =>
-          n.listed &&
-          n.price != null &&
-          n.owner !== user &&
-          n.owner !== actor &&
-          (!actor || n.owner.toLowerCase() !== actor.toLowerCase())
-      )
+      .filter((n) => {
+        if (!n.listed || n.price == null) return false
+        // Exclude own listings (logical owner = seller when escrowed)
+        if (isOwnerOf(n.owner)) return false
+        if (actor && n.owner.toLowerCase() === actor.toLowerCase()) return false
+        if (user && n.owner === user) return false
+        return true
+      })
       .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
-  }, [items, user, actor])
+  }, [items, user, actor, isOwnerOf])
 
   const colOffers = useMemo(
     () => (collection ? offers.filter((o) => o.collectionId === collection.id) : []),
@@ -218,6 +240,7 @@ export function CollectionPage() {
   const selectedNfts = sweepable.filter((n) => selected.has(n.id))
   const sweepTotal = selectedNfts.reduce((s, n) => s + (n.price ?? 0), 0)
   const listedCount = collectionNfts.filter((n) => n.listed).length
+  const auctionCount = collectionNfts.filter((n) => n.inAuction).length
 
   const onFiltersChange = (next: TraitFilterMap) => {
     setFilters(next)
@@ -254,14 +277,26 @@ export function CollectionPage() {
       let ok = 0
       let lastHash: string | undefined
       for (const n of selectedNfts) {
+        if (isOwnerOf(n.owner)) continue
         const tid = parseOnChainTokenId(n.id)
         if (tid == null) continue
         const L = listingByToken.get(String(tid))
-        if (!L) continue
+        if (!L?.active) continue
         try {
-          lastHash = await buyOnChain(L.listingId, L.price)
+          const h = await buyOnChain(L.listingId, L.price)
+          lastHash = h
+          try {
+            await waitReceipt(h)
+          } catch {
+            /* continue; listing may still settle */
+          }
           ok++
-        } catch {
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Buy failed'
+          if (/reject|denied|cancel|user rejected/i.test(msg)) {
+            setToast({ msg: 'Rejected in wallet' })
+            return
+          }
           break
         }
       }
@@ -287,13 +322,23 @@ export function CollectionPage() {
     }
     setToast({ msg: 'Minting… confirm in wallet', pending: true })
     try {
-      const h = await mintDemo()
-      setTimeout(() => void refreshChain(), 3000)
-      setToast({ msg: 'Mint submitted', hash: h })
+      const h = await mintDemo(1)
+      setToast({ msg: 'Mint submitted — waiting…', hash: h, pending: true })
+      try {
+        await waitReceipt(h)
+      } catch {
+        /* still refresh */
+      }
+      await refreshChain()
+      setToast({ msg: 'Mint confirmed', hash: h })
       setTimeout(() => setToast(null), 5000)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Mint failed'
-      setToast({ msg: msg.slice(0, 100) })
+      if (/reject|denied|cancel|user rejected/i.test(msg)) {
+        setToast({ msg: 'Rejected in wallet' })
+      } else {
+        setToast({ msg: msg.slice(0, 100) })
+      }
       setTimeout(() => setToast(null), 4000)
     }
   }
@@ -442,7 +487,20 @@ export function CollectionPage() {
                   {collection.source === 'opensea' && (
                     <>
                       <span className="text-edge hidden sm:inline">·</span>
-                      <span className="text-hood text-xs font-semibold">OpenSea stats</span>
+                      <span
+                        className={clsx(
+                          'text-xs font-semibold inline-flex items-center gap-1',
+                          openSeaStatus.live ? 'text-hood' : 'text-ink-3'
+                        )}
+                      >
+                        <span
+                          className={clsx(
+                            'w-1.5 h-1.5 rounded-full',
+                            openSeaStatus.live ? 'bg-hood animate-pulse' : 'bg-ink-3'
+                          )}
+                        />
+                        {openSeaStatus.live ? 'OpenSea live · 1s' : 'OpenSea snapshot'}
+                      </span>
                     </>
                   )}
                 </div>
@@ -561,6 +619,12 @@ export function CollectionPage() {
             { label: '24h volume', value: formatPrice(collection.volume24h), unit: 'ETH' },
             { label: 'Total volume', value: formatPrice(collection.volumeTotal), unit: 'ETH' },
             { label: 'Listed', value: String(listedCount), unit: '' },
+            {
+              label: 'Auctions',
+              value: String(auctionCount),
+              unit: '',
+              accent: auctionCount > 0,
+            },
             { label: 'Owners', value: collection.owners.toLocaleString(), unit: '' },
             { label: 'Items', value: collection.items.toLocaleString(), unit: '' },
           ].map((s) => (
@@ -677,7 +741,15 @@ export function CollectionPage() {
               </button>
 
               <div className="hidden sm:block text-xs text-ink-3">
-                {items.length.toLocaleString()} item{items.length === 1 ? '' : 's'}
+                {items.length.toLocaleString()}
+                {isOpenSeaCol && collection.items > 0 && (
+                  <>
+                    {' '}
+                    / {collection.items.toLocaleString()}
+                  </>
+                )}{' '}
+                item{items.length === 1 ? '' : 's'}
+                {openSeaNfts.loading && ' · loading…'}
               </div>
 
               <div className="flex items-center gap-2 ml-auto">
@@ -744,10 +816,37 @@ export function CollectionPage() {
               )}
 
               <div>
-                {items.length === 0 ? (
+                {isOnChainCol && (listedCount > 0 || auctionCount > 0) && (
+                  <div className="flex flex-wrap items-center gap-3 mb-3 text-[11px] text-ink-3">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded border-2 border-hood/60 bg-surface" />
+                      Listed ({listedCount})
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded border-2 border-amber-500/80 bg-surface" />
+                      Auction ({auctionCount})
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded border-2 border-edge bg-surface" />
+                      Unlisted
+                    </span>
+                  </div>
+                )}
+                {isOpenSeaCol && openSeaNfts.loading && items.length === 0 ? (
+                  <div className="rounded-2xl border border-edge py-20 text-center">
+                    <p className="text-ink font-medium">Loading collection from OpenSea…</p>
+                    <p className="text-sm text-ink-3 mt-1">
+                      Fetching NFTs and live listings for {collection.name}
+                    </p>
+                  </div>
+                ) : items.length === 0 ? (
                   <div className="rounded-2xl border border-edge py-20 text-center">
                     <p className="text-ink font-medium">No items found</p>
-                    <p className="text-sm text-ink-3 mt-1">Try clearing trait filters</p>
+                    <p className="text-sm text-ink-3 mt-1">
+                      {openSeaNfts.error
+                        ? openSeaNfts.error
+                        : 'Try clearing trait filters'}
+                    </p>
                     <Button
                       size="sm"
                       variant="outline"
@@ -758,43 +857,88 @@ export function CollectionPage() {
                     </Button>
                   </div>
                 ) : (
-                  <div className={clsx('grid', gridClass[grid])}>
-                    {items.map((n) => {
-                      const rank = rarityMap.get(n.id)?.rarityRank
-                      const canSelect =
-                        sweepMode &&
-                        n.listed &&
-                        n.price != null &&
-                        sweepable.some((s) => s.id === n.id)
-                      return (
-                        <div key={n.id} className="relative">
-                          {rank != null && !sweepMode && (
-                            <div className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded-md bg-black/55 backdrop-blur text-white text-[10px] font-bold tabular-nums">
-                              #{rank}
-                            </div>
-                          )}
-                          {sweepMode ? (
-                            canSelect ? (
-                              <NftCard
-                                nft={n}
-                                showCollection={false}
-                                selectable
-                                selected={selected.has(n.id)}
-                                onSelect={toggleSelect}
-                                compact={grid === 'sm'}
-                              />
-                            ) : (
-                              <div className="opacity-35 pointer-events-none">
-                                <NftCard nft={n} showCollection={false} compact={grid === 'sm'} />
+                  <>
+                    <div className={clsx('grid', gridClass[grid])}>
+                      {items.map((n) => {
+                        const rank = rarityMap.get(n.id)?.rarityRank ?? n.rarityRank
+                        const canSelect =
+                          sweepMode &&
+                          n.listed &&
+                          n.price != null &&
+                          sweepable.some((s) => s.id === n.id)
+                        return (
+                          <div key={n.id} className="relative">
+                            {rank != null && !sweepMode && (
+                              <div className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded-md bg-black/55 backdrop-blur text-white text-[10px] font-bold tabular-nums">
+                                #{rank}
                               </div>
-                            )
-                          ) : (
-                            <NftCard nft={n} showCollection={false} compact={grid === 'sm'} />
+                            )}
+                            {sweepMode ? (
+                              canSelect ? (
+                                <NftCard
+                                  nft={n}
+                                  showCollection={false}
+                                  selectable
+                                  selected={selected.has(n.id)}
+                                  onSelect={toggleSelect}
+                                  compact={grid === 'sm'}
+                                />
+                              ) : (
+                                <div className="opacity-35 pointer-events-none">
+                                  <NftCard nft={n} showCollection={false} compact={grid === 'sm'} />
+                                </div>
+                              )
+                            ) : (
+                              <NftCard nft={n} showCollection={false} compact={grid === 'sm'} />
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Pagination — full OpenSea catalog */}
+                    {isOpenSeaCol && (
+                      <div className="mt-6 flex flex-col items-center gap-3">
+                        <p className="text-xs text-ink-3 text-center">
+                          Showing {collectionNfts.length.toLocaleString()}
+                          {collection.items > 0 && (
+                            <> of {collection.items.toLocaleString()}</>
+                          )}{' '}
+                          NFTs from OpenSea
+                          {openSeaNfts.hasMore ? ' · more available' : ' · end of catalog'}
+                        </p>
+                        <div className="flex flex-wrap justify-center gap-2">
+                          {openSeaNfts.hasMore && (
+                            <Button
+                              size="md"
+                              variant="secondary"
+                              disabled={openSeaNfts.loadingMore}
+                              onClick={() => void openSeaNfts.loadMore()}
+                            >
+                              {openSeaNfts.loadingMore
+                                ? 'Loading…'
+                                : 'Load 50 more'}
+                            </Button>
+                          )}
+                          {openSeaNfts.hasMore && (
+                            <Button
+                              size="md"
+                              variant="outline"
+                              disabled={openSeaNfts.loadingMore}
+                              onClick={() => void openSeaNfts.loadAll()}
+                            >
+                              {openSeaNfts.loadingMore
+                                ? 'Loading all…'
+                                : 'Load entire collection'}
+                            </Button>
                           )}
                         </div>
-                      )
-                    })}
-                  </div>
+                        {openSeaNfts.error && (
+                          <p className="text-xs text-orange-500">{openSeaNfts.error}</p>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -804,62 +948,82 @@ export function CollectionPage() {
         {/* —— OFFERS —— */}
         {tab === 'offers' && (
           <div className="rounded-2xl border border-edge overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-edge bg-surface-2">
-              <h2 className="text-sm font-bold text-ink">Offers</h2>
-              <Button size="sm" onClick={() => setOfferOpen(true)}>
-                Make collection offer
-              </Button>
-            </div>
-            <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3 border-b border-edge">
-              <div className="col-span-2">Type</div>
-              <div className="col-span-3">Item</div>
-              <div className="col-span-2">Price</div>
-              <div className="col-span-1">Qty</div>
-              <div className="col-span-2">From</div>
-              <div className="col-span-2">Expires</div>
-            </div>
-            {colOffers.length === 0 && (
-              <div className="py-16 text-center">
-                <p className="text-ink font-medium">No offers yet</p>
-                <p className="text-sm text-ink-3 mt-1">Be the first to make an offer</p>
-                <Button size="sm" className="mt-4" onClick={() => setOfferOpen(true)}>
-                  Make offer
-                </Button>
-              </div>
-            )}
-            {colOffers.map((o) => {
-              const nft = o.nftId ? nfts.find((n) => n.id === o.nftId) : undefined
-              return (
-                <div
-                  key={o.id}
-                  className="grid grid-cols-2 sm:grid-cols-12 gap-2 px-4 py-3.5 text-sm border-b border-edge last:border-0 items-center hover:bg-surface-2/50"
-                >
-                  <div className="sm:col-span-2">
-                    <Badge tone={o.type === 'collection' ? 'blue' : 'green'}>
-                      {o.type === 'collection' ? 'Collection' : 'Item'}
-                    </Badge>
-                  </div>
-                  <div className="sm:col-span-3 flex items-center gap-2 min-w-0">
-                    {nft && (
-                      <img src={nft.image} alt="" className="w-8 h-8 rounded-lg object-cover" />
-                    )}
-                    <span className="truncate font-medium text-ink">
-                      {nft ? nft.name : collection.name}
-                    </span>
-                  </div>
-                  <div className="sm:col-span-2 font-bold text-hood tabular-nums">
-                    {formatPrice(o.price)} ETH
-                  </div>
-                  <div className="sm:col-span-1 text-ink-2">{o.quantity ?? 1}</div>
-                  <div className="sm:col-span-2 text-ink-3 font-mono text-xs truncate">
-                    {o.offerer}
-                  </div>
-                  <div className="sm:col-span-2 text-ink-3 text-xs">
-                    {timeAgo(o.createdAt)} · exp {timeAgo(o.expiresAt).replace(' ago', '')}
-                  </div>
+            {isOnChainCol ? (
+              <div className="py-16 px-6 text-center">
+                <p className="text-ink font-medium">On-chain offers not available yet</p>
+                <p className="text-sm text-ink-3 mt-2 max-w-md mx-auto">
+                  The testnet marketplace supports fixed-price sales and English auctions.
+                  Off-chain/demo offers are for catalog collections only.
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setTab('items')}>
+                    Browse items
+                  </Button>
+                  <Button size="sm" onClick={() => void handleMintDemo()}>
+                    Mint demo NFT
+                  </Button>
                 </div>
-              )
-            })}
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-edge bg-surface-2">
+                  <h2 className="text-sm font-bold text-ink">Offers</h2>
+                  <Button size="sm" onClick={() => setOfferOpen(true)}>
+                    Make collection offer
+                  </Button>
+                </div>
+                <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3 border-b border-edge">
+                  <div className="col-span-2">Type</div>
+                  <div className="col-span-3">Item</div>
+                  <div className="col-span-2">Price</div>
+                  <div className="col-span-1">Qty</div>
+                  <div className="col-span-2">From</div>
+                  <div className="col-span-2">Expires</div>
+                </div>
+                {colOffers.length === 0 && (
+                  <div className="py-16 text-center">
+                    <p className="text-ink font-medium">No offers yet</p>
+                    <p className="text-sm text-ink-3 mt-1">Be the first to make an offer</p>
+                    <Button size="sm" className="mt-4" onClick={() => setOfferOpen(true)}>
+                      Make offer
+                    </Button>
+                  </div>
+                )}
+                {colOffers.map((o) => {
+                  const nft = o.nftId ? nfts.find((n) => n.id === o.nftId) : undefined
+                  return (
+                    <div
+                      key={o.id}
+                      className="grid grid-cols-2 sm:grid-cols-12 gap-2 px-4 py-3.5 text-sm border-b border-edge last:border-0 items-center hover:bg-surface-2/50"
+                    >
+                      <div className="sm:col-span-2">
+                        <Badge tone={o.type === 'collection' ? 'blue' : 'green'}>
+                          {o.type === 'collection' ? 'Collection' : 'Item'}
+                        </Badge>
+                      </div>
+                      <div className="sm:col-span-3 flex items-center gap-2 min-w-0">
+                        {nft && (
+                          <img src={nft.image} alt="" className="w-8 h-8 rounded-lg object-cover" />
+                        )}
+                        <span className="truncate font-medium text-ink">
+                          {nft ? nft.name : collection.name}
+                        </span>
+                      </div>
+                      <div className="sm:col-span-2 font-bold text-hood tabular-nums">
+                        {formatPrice(o.price)} ETH
+                      </div>
+                      <div className="sm:col-span-1 text-ink-2">{o.quantity ?? 1}</div>
+                      <div className="sm:col-span-2 text-ink-3 font-mono text-xs truncate">
+                        {o.offerer}
+                      </div>
+                      <div className="sm:col-span-2 text-ink-3 text-xs">
+                        {timeAgo(o.createdAt)} · exp {timeAgo(o.expiresAt).replace(' ago', '')}
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
           </div>
         )}
 
@@ -917,7 +1081,18 @@ export function CollectionPage() {
             </div>
             <div className="rounded-2xl border border-edge overflow-hidden">
               {filteredActivity.length === 0 ? (
-                <p className="p-12 text-center text-ink-3 text-sm">No activity yet</p>
+                <div className="p-12 text-center">
+                  <p className="text-ink-3 text-sm">
+                    {isOnChainCol
+                      ? 'Loading on-chain activity… or no events yet. Mint, list, or buy to generate history.'
+                      : 'No activity yet'}
+                  </p>
+                  {isOnChainCol && (
+                    <Button size="sm" className="mt-3" onClick={() => void handleMintDemo()}>
+                      Mint demo NFT
+                    </Button>
+                  )}
+                </div>
               ) : (
                 filteredActivity.map((a) => <ActivityRow key={a.id} activity={a} />)
               )}

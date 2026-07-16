@@ -75,10 +75,19 @@ export function CollectionInsights({
   )
 
   const localStats = useMemo(() => computeInsightStats(filtered), [filtered])
-  const osStats = openSeaRangeStats(range, intervals)
+  // OpenSea intervals only for OpenSea-sourced collections; demo/on-chain uses local activity
+  const osStats =
+    source === 'opensea' ? openSeaRangeStats(range, intervals) : null
+  // Prefer indexed intervals for on-chain demo when activity volume is present
+  const chainIntervalStats =
+    source !== 'opensea' && intervals
+      ? openSeaRangeStats(range, intervals)
+      : null
 
-  const salesCount = osStats?.sales ?? localStats.salesCount
-  const salesVolume = osStats?.volume ?? localStats.salesVolume
+  const salesCount =
+    osStats?.sales ?? chainIntervalStats?.sales ?? localStats.salesCount
+  const salesVolume =
+    osStats?.volume ?? chainIntervalStats?.volume ?? localStats.salesVolume
   const avgSale = salesCount ? salesVolume / salesCount : 0
 
   const series = useMemo(
@@ -174,19 +183,25 @@ export function CollectionInsights({
         </div>
       </div>
 
-      {/* OpenSea official interval strip */}
+      {/* Volume intervals (OpenSea API or on-chain indexed) */}
       {intervals && (
         <div className="rounded-2xl border border-edge bg-surface-2 p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-ink">OpenSea analytics intervals</h3>
-            <a
-              href={OPENSEA_DOCS.stats}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[11px] text-hood font-medium hover:underline"
-            >
-              API: collection stats →
-            </a>
+            <h3 className="text-sm font-bold text-ink">
+              {source === 'opensea' ? 'OpenSea analytics intervals' : 'On-chain volume'}
+            </h3>
+            {source === 'opensea' ? (
+              <a
+                href={OPENSEA_DOCS.stats}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-hood font-medium hover:underline"
+              >
+                API: collection stats →
+              </a>
+            ) : (
+              <span className="text-[11px] text-ink-3 font-medium">From marketplace events</span>
+            )}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[

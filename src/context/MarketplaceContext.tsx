@@ -31,6 +31,11 @@ import {
   useOnChainCollectionMeta,
   useOnChainInventory,
 } from '../hooks/useOnChainMarket'
+import { useOnChainActivity } from '../hooks/useOnChainActivity'
+import {
+  useOpenSeaLive,
+  type OpenSeaLiveStatus,
+} from '../hooks/useOpenSeaLive'
 import type { ChainAuction, ChainListing } from '../lib/marketplace'
 
 interface MarketplaceCtx {
@@ -48,6 +53,8 @@ interface MarketplaceCtx {
   refresh: () => void
   /** Refetch on-chain listings / ownership */
   refreshChain: () => Promise<void>
+  /** Force OpenSea live stats pull */
+  refreshOpenSea: () => Promise<void>
   buy: (nftId: string) => boolean
   bulkBuy: (nftIds: string[]) => number
   list: (nftId: string, price: number) => boolean
@@ -65,6 +72,8 @@ interface MarketplaceCtx {
   auctionByToken: Map<string, ChainAuction>
   chainListings: ChainListing[]
   chainAuctions: ChainAuction[]
+  /** OpenSea live poll status */
+  openSeaStatus: OpenSeaLiveStatus
 }
 
 const MarketplaceContext = createContext<MarketplaceCtx | null>(null)
@@ -85,12 +94,23 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
     collectionPatch,
     refetchAll,
   } = useOnChainInventory()
+  const {
+    activities: chainActivities,
+    stats: chainVolume,
+    refetch: refetchActivity,
+  } = useOnChainActivity()
+  const {
+    openSeaCollections,
+    openSeaActivities,
+    openSeaStatus,
+    refreshOpenSea,
+  } = useOpenSeaLive()
 
   const refresh = useCallback(() => setTick((t) => t + 1), [])
   const refreshChain = useCallback(async () => {
-    await refetchAll()
+    await Promise.all([refetchAll(), refetchActivity(), refreshOpenSea()])
     refresh()
-  }, [refetchAll, refresh])
+  }, [refetchAll, refetchActivity, refreshOpenSea, refresh])
 
   const connected = Boolean(isConnected && address)
   const actor = connected && address ? actorId(address) : ''
@@ -98,22 +118,59 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
 
   const collections = useMemo(() => {
     void tick
-    const mock = [...seedCollections]
-    if (!chainEnabled || !isMarketplaceDeployed()) return mock
-    const live: Collection = {
-      ...onChainMeta,
-      ...collectionPatch,
+    // Live OpenSea Robinhood collections (polled every second)
+    const liveOs = openSeaCollections
+    // Local demo collections only (not OpenSea snapshot)
+    const demoLocal = seedCollections.filter((c) => c.source !== 'opensea')
+
+    let list: Collection[] = [...liveOs, ...demoLocal]
+
+    if (chainEnabled && isMarketplaceDeployed()) {
+      const liveChain: Collection = {
+        ...onChainMeta,
+        ...collectionPatch,
+        volume24h: chainVolume.volume24h,
+        volumeTotal: chainVolume.volumeTotal,
+        salesTotal: chainVolume.salesTotal,
+        intervals: chainVolume.intervals,
+      }
+      list = [liveChain, ...list.filter((c) => c.id !== ONCHAIN_COLLECTION_ID)]
     }
-    // Put live testnet collection first
-    return [live, ...mock.filter((c) => c.id !== ONCHAIN_COLLECTION_ID)]
-  }, [tick, chainEnabled, onChainMeta, collectionPatch])
+
+    // Stable sort: on-chain first, then by 24h volume
+    return list.sort((a, b) => {
+      if (a.id === ONCHAIN_COLLECTION_ID) return -1
+      if (b.id === ONCHAIN_COLLECTION_ID) return 1
+      return b.volume24h - a.volume24h
+    })
+  }, [
+    tick,
+    openSeaCollections,
+    chainEnabled,
+    onChainMeta,
+    collectionPatch,
+    chainVolume,
+  ])
 
   const nfts = useMemo(() => {
     void tick
     const mock = seedNfts.filter((n) => n.collectionId !== ONCHAIN_COLLECTION_ID)
-    if (!chainEnabled) return [...mock]
-    return [...chainNfts, ...mock]
-  }, [tick, chainEnabled, chainNfts])
+    // Re-price mock OpenSea catalog nfts from live floors when available
+    const floorByCol = new Map(
+      collections.filter((c) => c.source === 'opensea').map((c) => [c.id, c.floorPrice])
+    )
+    const priced = mock.map((n) => {
+      const floor = floorByCol.get(n.collectionId)
+      if (floor == null || floor <= 0 || !n.listed) return n
+      // Anchor listed mock items to live OpenSea floor with light variance
+      return {
+        ...n,
+        price: +Number(floor * (0.95 + (n.tokenId % 10) * 0.012)).toPrecision(6),
+      }
+    })
+    if (!chainEnabled) return priced
+    return [...chainNfts, ...priced]
+  }, [tick, chainEnabled, chainNfts, collections])
 
   const offers = useMemo(() => {
     void tick
@@ -122,13 +179,42 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
 
   const activities = useMemo(() => {
     void tick
-    return [...seedActivities]
-  }, [tick])
+    const mock = seedActivities.filter(
+      (a) =>
+        a.collectionId !== ONCHAIN_COLLECTION_ID &&
+        !a.id.startsWith('os-')
+    )
+    return [...chainActivities, ...openSeaActivities, ...mock].sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )
+  }, [tick, chainActivities, openSeaActivities])
 
   const mintDrops = useMemo(() => {
     void tick
-    return [...seedMints]
-  }, [tick])
+    const mock = [...seedMints]
+    if (!chainEnabled || !isMarketplaceDeployed()) return mock
+    const onChainDrop: MintDrop = {
+      id: 'mint-onchain-openhood',
+      slug: 'openhood-testnet-mint',
+      name: 'OpenHood Testnet Mint',
+      description:
+        'Free on-chain mint on Robinhood testnet (MockERC721). Mint 1–20 per tx, then list or auction on OpenHood.',
+      image: onChainMeta.image,
+      banner: onChainMeta.banner,
+      collectionId: ONCHAIN_COLLECTION_ID,
+      price: 0,
+      supply: 10_000,
+      minted: collectionPatch.items || chainNfts.length,
+      maxPerWallet: 20,
+      status: 'live',
+      startsAt: new Date(0).toISOString(),
+      chain: 'Robinhood Testnet',
+      founder: onChainMeta.founder,
+      onChain: true,
+    }
+    return [onChainDrop, ...mock]
+  }, [tick, chainEnabled, onChainMeta, collectionPatch.items, chainNfts.length])
 
   const connect = useCallback(() => openConnectWallet(), [])
   const disconnect = useCallback(() => wagmiDisconnect(), [wagmiDisconnect])
@@ -234,6 +320,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         mintDrops,
         refresh,
         refreshChain,
+        refreshOpenSea,
         buy,
         bulkBuy,
         list,
@@ -247,6 +334,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         auctionByToken,
         chainListings,
         chainAuctions,
+        openSeaStatus,
       }}
     >
       {children}

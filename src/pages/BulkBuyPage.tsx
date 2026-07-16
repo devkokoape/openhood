@@ -27,7 +27,7 @@ export function BulkBuyPage() {
     chainEnabled,
     refreshChain,
   } = useMarketplace()
-  const { buyOnChain, isPending, isConfirming } = useMarketplaceTx()
+  const { buyOnChain, isPending, isConfirming, waitReceipt } = useMarketplaceTx()
   const { feeBps } = useMarketFee()
   const [params] = useSearchParams()
   const initialSlug = params.get('collection') || ''
@@ -89,19 +89,35 @@ export function BulkBuyPage() {
       let ok = 0
       let lastHash: string | undefined
       for (const n of selectedNfts) {
+        // Never buy own listings
+        if (isOwnerOf(n.owner)) continue
         const tid = parseOnChainTokenId(n.id)
         if (tid == null) continue
         const L = listingByToken.get(String(tid))
-        if (!L) continue
+        if (!L?.active) continue
         try {
-          lastHash = await buyOnChain(L.listingId, L.price)
+          const h = await buyOnChain(L.listingId, L.price)
+          lastHash = h
+          try {
+            await waitReceipt(h)
+          } catch {
+            /* still count; explorer may show status */
+          }
           ok++
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Buy failed'
-          if (/reject|denied|cancel/i.test(msg)) {
+          if (/reject|denied|cancel|user rejected/i.test(msg)) {
             setToast({ msg: 'Rejected in wallet' })
             return
           }
+          // stop sweep on first hard failure (e.g. insufficient funds)
+          setToast({
+            msg: `Bought ${ok} then failed: ${msg.slice(0, 80)}`,
+            hash: lastHash,
+          })
+          await refreshChain()
+          setTimeout(() => setToast(null), 5000)
+          return
         }
       }
       await refreshChain()
