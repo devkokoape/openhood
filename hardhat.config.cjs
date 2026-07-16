@@ -2,6 +2,7 @@ require("dotenv").config();
 require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-chai-matchers");
 require("@nomicfoundation/hardhat-network-helpers");
+require("@nomicfoundation/hardhat-verify");
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -27,6 +28,25 @@ module.exports = {
         ? [process.env.DEPLOYER_PRIVATE_KEY]
         : [],
     },
+  },
+  etherscan: {
+    // Blockscout accepts any non-empty API key
+    apiKey: {
+      robinhoodTestnet: process.env.BLOCKSCOUT_API_KEY || "openhood",
+    },
+    customChains: [
+      {
+        network: "robinhoodTestnet",
+        chainId: 46630,
+        urls: {
+          apiURL: "https://explorer.testnet.chain.robinhood.com/api",
+          browserURL: "https://explorer.testnet.chain.robinhood.com",
+        },
+      },
+    ],
+  },
+  sourcify: {
+    enabled: false,
   },
   mocha: {
     timeout: 120000,
