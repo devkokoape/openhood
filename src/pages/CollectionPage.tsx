@@ -1,0 +1,973 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import {
+  BadgeCheck,
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  Globe,
+  Grid2x2,
+  Grid3x3,
+  LayoutGrid,
+  Maximize2,
+  Minimize2,
+  Pencil,
+  Share2,
+  ShoppingCart,
+  Trash2,
+  X,
+} from 'lucide-react'
+import clsx from 'clsx'
+import { useMarketplace } from '../context/MarketplaceContext'
+import { NftCard } from '../components/nft/NftCard'
+import { ActivityRow } from '../components/nft/ActivityRow'
+import { OfferModal } from '../components/nft/OfferModal'
+import { TraitFilterPanel } from '../components/nft/TraitFilterPanel'
+import { CollectionAnalytics } from '../components/collection/CollectionAnalytics'
+import { CollectionInsights } from '../components/collection/CollectionInsights'
+import { Button } from '../components/ui/Button'
+import { Badge } from '../components/ui/Badge'
+import { formatPrice, timeAgo } from '../data/mockData'
+import {
+  activeFilterCount,
+  buildTraitStats,
+  filterByTraits,
+  rankByRarity,
+  type TraitFilterMap,
+} from '../lib/traits'
+import type { ActivityType } from '../types'
+
+type SortKey = 'price_asc' | 'price_desc' | 'id' | 'rarity_asc' | 'rarity_desc'
+type GridSize = 'sm' | 'md' | 'lg'
+type BannerSize = 'sm' | 'md' | 'lg'
+
+const gridClass: Record<GridSize, string> = {
+  sm: 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2',
+  md: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3',
+  lg: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4',
+}
+
+const bannerHeight: Record<BannerSize, string> = {
+  sm: 'h-[88px] sm:h-[100px] md:h-[120px]',
+  md: 'h-[160px] sm:h-[200px] md:h-[240px]',
+  lg: 'h-[220px] sm:h-[280px] md:h-[360px]',
+}
+
+const avatarOffset: Record<BannerSize, string> = {
+  sm: '-mt-8 sm:-mt-10',
+  md: '-mt-12 sm:-mt-14',
+  lg: '-mt-14 sm:-mt-16',
+}
+
+const activityFilters: { id: string; label: string; types?: ActivityType[] }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'sale', label: 'Sales', types: ['sale'] },
+  { id: 'listing', label: 'Listings', types: ['listing'] },
+  { id: 'bid', label: 'Bids & offers', types: ['bid', 'offer', 'collection_offer'] },
+  { id: 'mint', label: 'Mints', types: ['mint'] },
+  { id: 'transfer', label: 'Transfers', types: ['transfer'] },
+]
+
+const mainTabs = [
+  { id: 'items', label: 'Items' },
+  { id: 'offers', label: 'Offers' },
+  { id: 'insights', label: 'Insights' },
+  { id: 'analytics', label: 'Analytics' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'traits', label: 'Traits' },
+] as const
+
+export function CollectionPage() {
+  const { slug } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { collections, nfts, offers, activities, user, bulkBuy, connected, connect } =
+    useMarketplace()
+  const [tab, setTab] = useState('items')
+  const [offerOpen, setOfferOpen] = useState(false)
+  const [sort, setSort] = useState<SortKey>('price_asc')
+  const [filters, setFilters] = useState<TraitFilterMap>({})
+  const [mobileFilters, setMobileFilters] = useState(false)
+  const [showDesc, setShowDesc] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [grid, setGrid] = useState<GridSize>(() => {
+    const g = localStorage.getItem('openhood-grid') as GridSize | null
+    return g === 'sm' || g === 'md' || g === 'lg' ? g : 'md'
+  })
+  const [bannerSize, setBannerSize] = useState<BannerSize>(() => {
+    const b = localStorage.getItem('openhood-banner') as BannerSize | null
+    return b === 'sm' || b === 'md' || b === 'lg' ? b : 'md'
+  })
+  const [sweepMode, setSweepMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [toast, setToast] = useState('')
+  const [activityFilter, setActivityFilter] = useState('all')
+
+  const collection = collections.find((c) => c.slug === slug || c.id === slug)
+
+  useEffect(() => {
+    localStorage.setItem('openhood-grid', grid)
+  }, [grid])
+
+  useEffect(() => {
+    localStorage.setItem('openhood-banner', bannerSize)
+  }, [bannerSize])
+
+  const shrinkBanner = () =>
+    setBannerSize((s) => (s === 'lg' ? 'md' : s === 'md' ? 'sm' : 'sm'))
+  const growBanner = () =>
+    setBannerSize((s) => (s === 'sm' ? 'md' : s === 'md' ? 'lg' : 'lg'))
+
+  useEffect(() => {
+    const trait = searchParams.get('trait')
+    const value = searchParams.get('value')
+    if (trait && value) {
+      setFilters({ [trait]: [value] })
+      setTab('items')
+    }
+    if (searchParams.get('sweep') === '1') {
+      setSweepMode(true)
+      setTab('items')
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    setSelected(new Set())
+  }, [collection?.id, sweepMode])
+
+  const collectionNfts = useMemo(
+    () => (collection ? nfts.filter((n) => n.collectionId === collection.id) : []),
+    [collection, nfts]
+  )
+
+  const traitStats = useMemo(() => buildTraitStats(collectionNfts), [collectionNfts])
+
+  const rarityMap = useMemo(() => {
+    const ranked = rankByRarity(collectionNfts)
+    return new Map(ranked.map((r) => [r.nft.id, r]))
+  }, [collectionNfts])
+
+  const items = useMemo(() => {
+    let list = filterByTraits(collectionNfts, filters)
+    list = [...list]
+    if (sort === 'price_asc') list.sort((a, b) => (a.price ?? 1e9) - (b.price ?? 1e9))
+    if (sort === 'price_desc') list.sort((a, b) => (b.price ?? 0) - (a.price ?? 0))
+    if (sort === 'id') list.sort((a, b) => a.tokenId - b.tokenId)
+    if (sort === 'rarity_asc')
+      list.sort(
+        (a, b) =>
+          (rarityMap.get(a.id)?.rarityRank ?? 9999) - (rarityMap.get(b.id)?.rarityRank ?? 9999)
+      )
+    if (sort === 'rarity_desc')
+      list.sort(
+        (a, b) =>
+          (rarityMap.get(b.id)?.rarityRank ?? 0) - (rarityMap.get(a.id)?.rarityRank ?? 0)
+      )
+    return list
+  }, [collectionNfts, filters, sort, rarityMap])
+
+  const sweepable = useMemo(() => {
+    return items
+      .filter((n) => n.listed && n.price != null && n.owner !== user)
+      .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
+  }, [items, user])
+
+  const colOffers = useMemo(
+    () => (collection ? offers.filter((o) => o.collectionId === collection.id) : []),
+    [collection, offers]
+  )
+
+  const colActivity = useMemo(
+    () => (collection ? activities.filter((a) => a.collectionId === collection.id) : []),
+    [collection, activities]
+  )
+
+  const filteredActivity = useMemo(() => {
+    const f = activityFilters.find((x) => x.id === activityFilter)
+    if (!f?.types) return colActivity
+    return colActivity.filter((a) => f.types!.includes(a.type))
+  }, [colActivity, activityFilter])
+
+  const filterCount = activeFilterCount(filters)
+  const selectedNfts = sweepable.filter((n) => selected.has(n.id))
+  const sweepTotal = selectedNfts.reduce((s, n) => s + (n.price ?? 0), 0)
+  const listedCount = collectionNfts.filter((n) => n.listed).length
+
+  const onFiltersChange = (next: TraitFilterMap) => {
+    setFilters(next)
+    const entries = Object.entries(next)
+    if (entries.length === 1 && entries[0][1].length === 1) {
+      setSearchParams({ trait: entries[0][0], value: entries[0][1][0] }, { replace: true })
+    } else if (entries.length === 0) {
+      setSearchParams({}, { replace: true })
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectFloor = (n: number) => setSelected(new Set(sweepable.slice(0, n).map((x) => x.id)))
+  const selectAllListed = () => setSelected(new Set(sweepable.map((x) => x.id)))
+  const clearSelection = () => setSelected(new Set())
+
+  const doSweep = () => {
+    if (!connected) {
+      connect()
+      return
+    }
+    if (selected.size === 0) return
+    const count = bulkBuy([...selected])
+    setToast(`Swept ${count} NFT${count === 1 ? '' : 's'} for ${formatPrice(sweepTotal)} ETH`)
+    setSelected(new Set())
+    setTimeout(() => setToast(''), 3000)
+  }
+
+  const toggleSweep = () => {
+    setSweepMode((s) => !s)
+    setSelected(new Set())
+  }
+
+  if (!collection) {
+    return (
+      <div className="mx-auto max-w-[1600px] px-4 py-20 text-center">
+        <p className="text-ink-2">Collection not found.</p>
+        <Link to="/" className="text-hood text-sm mt-2 inline-block">
+          Back to explore
+        </Link>
+      </div>
+    )
+  }
+
+  const isFounder = user === collection.founder
+  const descLong = collection.description.length > 140
+
+  return (
+    <div className={clsx('animate-fade-in', sweepMode && selected.size > 0 && 'pb-28')}>
+      {toast && (
+        <div className="fixed top-20 right-4 z-50 px-4 py-2 rounded-xl bg-hood text-[#0b0e11] font-semibold text-sm shadow-lg">
+          {toast}
+        </div>
+      )}
+
+      {/* —— Banner (resizable) —— */}
+      <div
+        className={clsx(
+          'relative w-full bg-surface-3 overflow-hidden transition-all duration-300 ease-out',
+          bannerHeight[bannerSize]
+        )}
+      >
+        <img
+          src={collection.banner}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10" />
+
+        {/* Banner size controls */}
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-xl bg-black/45 backdrop-blur-md border border-white/15 p-1">
+          <button
+            type="button"
+            onClick={shrinkBanner}
+            disabled={bannerSize === 'sm'}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-white/90 hover:bg-white/15 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+            title="Smaller banner"
+            aria-label="Smaller banner"
+          >
+            <Minimize2 className="w-3.5 h-3.5" />
+          </button>
+          <div className="flex items-center gap-0.5 px-0.5">
+            {(['sm', 'md', 'lg'] as BannerSize[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setBannerSize(s)}
+                title={s === 'sm' ? 'Small' : s === 'md' ? 'Medium' : 'Large'}
+                className={clsx(
+                  'rounded-full transition-all cursor-pointer',
+                  s === 'sm' && 'w-1.5 h-1.5',
+                  s === 'md' && 'w-2 h-2',
+                  s === 'lg' && 'w-2.5 h-2.5',
+                  bannerSize === s ? 'bg-hood' : 'bg-white/40 hover:bg-white/70'
+                )}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={growBanner}
+            disabled={bannerSize === 'lg'}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-white/90 hover:bg-white/15 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+            title="Larger banner"
+            aria-label="Larger banner"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className="absolute bottom-2 left-3 z-10 px-2 py-0.5 rounded-md bg-black/40 backdrop-blur text-[10px] font-semibold text-white/80 uppercase tracking-wide">
+          Banner {bannerSize}
+        </div>
+      </div>
+
+      {/* —— Header block —— */}
+      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6">
+        {/* Avatar + actions row */}
+        <div
+          className={clsx(
+            'relative flex flex-col sm:flex-row sm:items-end gap-4 transition-all duration-300',
+            avatarOffset[bannerSize]
+          )}
+        >
+          <div className="relative shrink-0">
+            <img
+              src={collection.image}
+              alt={collection.name}
+              className={clsx(
+                'rounded-2xl object-cover border-4 border-surface shadow-xl bg-surface transition-all duration-300',
+                bannerSize === 'sm'
+                  ? 'w-16 h-16 sm:w-20 sm:h-20'
+                  : bannerSize === 'lg'
+                    ? 'w-[110px] h-[110px] sm:w-[128px] sm:h-[128px]'
+                    : 'w-[100px] h-[100px] sm:w-[120px] sm:h-[120px]'
+              )}
+            />
+            {collection.verified && (
+              <span className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface flex items-center justify-center shadow">
+                <BadgeCheck className="w-5 h-5 text-hood" />
+              </span>
+            )}
+          </div>
+
+          <div className="flex-1 min-w-0 pb-1">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-ink tracking-tight flex items-center gap-2 flex-wrap">
+                  {collection.name}
+                  {collection.verified && (
+                    <BadgeCheck className="w-6 h-6 text-hood shrink-0 sm:hidden" />
+                  )}
+                </h1>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-3">
+                  <span>
+                    by{' '}
+                    <Link
+                      to={`/profile/${encodeURIComponent(collection.founder)}`}
+                      className="text-ink font-medium hover:text-hood"
+                    >
+                      {collection.founder}
+                    </Link>
+                  </span>
+                  <span className="text-edge hidden sm:inline">·</span>
+                  <span className="text-ink-3">Robinhood Chain</span>
+                  {collection.source === 'opensea' && (
+                    <>
+                      <span className="text-edge hidden sm:inline">·</span>
+                      <span className="text-hood text-xs font-semibold">OpenSea stats</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {collection.openseaUrl && (
+                  <a
+                    href={collection.openseaUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="h-9 px-2.5 rounded-xl border border-edge bg-surface hover:bg-surface-2 flex items-center justify-center text-[11px] font-bold text-ink-2 hover:text-hood transition-colors"
+                    title="View on OpenSea"
+                  >
+                    OS
+                  </a>
+                )}
+                {collection.website && (
+                  <a
+                    href={collection.website}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-9 h-9 rounded-xl border border-edge bg-surface hover:bg-surface-2 flex items-center justify-center text-ink-2 hover:text-ink transition-colors"
+                    title="Website"
+                  >
+                    <Globe className="w-4 h-4" />
+                  </a>
+                )}
+                {collection.twitter && (
+                  <a
+                    href={`https://x.com/${collection.twitter}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-9 h-9 rounded-xl border border-edge bg-surface hover:bg-surface-2 flex items-center justify-center text-ink-2 hover:text-ink transition-colors text-xs font-bold"
+                    title="X / Twitter"
+                  >
+                    𝕏
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="w-9 h-9 rounded-xl border border-edge bg-surface hover:bg-surface-2 flex items-center justify-center text-ink-2 cursor-pointer"
+                  title="Share"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(window.location.href)
+                    setToast('Link copied')
+                    setTimeout(() => setToast(''), 1500)
+                  }}
+                >
+                  <Share2 className="w-4 h-4" />
+                </button>
+                {isFounder && (
+                  <Link
+                    to={`/collection/${collection.slug}/edit`}
+                    className="w-9 h-9 rounded-xl border border-edge bg-surface hover:bg-surface-2 flex items-center justify-center text-ink-2"
+                    title="Edit"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Link>
+                )}
+                <Button
+                  size="sm"
+                  variant={sweepMode ? 'primary' : 'outline'}
+                  onClick={() => {
+                    setTab('items')
+                    toggleSweep()
+                  }}
+                >
+                  <ShoppingCart className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{sweepMode ? 'Exit' : 'Sweep'}</span>
+                </Button>
+                <Button size="sm" onClick={() => setOfferOpen(true)}>
+                  Make offer
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Description */}
+        <div className="mt-4 max-w-3xl">
+          <p className={clsx('text-sm text-ink-2 leading-relaxed', !showDesc && 'line-clamp-2')}>
+            {collection.description}
+          </p>
+          {descLong && (
+            <button
+              type="button"
+              onClick={() => setShowDesc((s) => !s)}
+              className="mt-1 text-xs font-semibold text-hood hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+            >
+              {showDesc ? (
+                <>
+                  Show less <ChevronUp className="w-3 h-3" />
+                </>
+              ) : (
+                <>
+                  Show more <ChevronDown className="w-3 h-3" />
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* OpenSea-style stat strip */}
+        <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3 sm:gap-x-8">
+          {[
+            { label: 'Floor price', value: formatPrice(collection.floorPrice), unit: 'ETH', accent: true },
+            { label: 'Top offer', value: colOffers[0] ? formatPrice(colOffers[0].price) : '—', unit: colOffers[0] ? 'ETH' : '' },
+            { label: '24h volume', value: formatPrice(collection.volume24h), unit: 'ETH' },
+            { label: 'Total volume', value: formatPrice(collection.volumeTotal), unit: 'ETH' },
+            { label: 'Listed', value: String(listedCount), unit: '' },
+            { label: 'Owners', value: collection.owners.toLocaleString(), unit: '' },
+            { label: 'Items', value: collection.items.toLocaleString(), unit: '' },
+          ].map((s) => (
+            <div key={s.label} className="min-w-[72px]">
+              <div className="text-[11px] text-ink-3 font-medium">{s.label}</div>
+              <div
+                className={clsx(
+                  'text-base sm:text-lg font-bold tabular-nums mt-0.5',
+                  s.accent ? 'text-hood' : 'text-ink'
+                )}
+              >
+                {s.value}
+                {s.unit && (
+                  <span className="text-xs font-semibold text-ink-3 ml-1">{s.unit}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* —— Sticky tabs (OpenSea style) —— */}
+      <div className="sticky top-14 z-30 mt-6 border-b border-edge bg-surface/95 backdrop-blur-xl">
+        <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6 flex items-center gap-1 overflow-x-auto hide-scrollbar">
+          {mainTabs.map((t) => {
+            const count =
+              t.id === 'items'
+                ? items.length
+                : t.id === 'offers'
+                  ? colOffers.length
+                  : t.id === 'activity'
+                    ? colActivity.length
+                    : undefined
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setTab(t.id)
+                  if (t.id !== 'items') setSweepMode(false)
+                }}
+                className={clsx(
+                  'relative px-4 py-3.5 text-sm font-semibold whitespace-nowrap transition-colors cursor-pointer',
+                  tab === t.id ? 'text-ink' : 'text-ink-3 hover:text-ink'
+                )}
+              >
+                {t.label}
+                {count != null && (
+                  <span className="ml-1.5 text-xs font-medium text-ink-3 tabular-nums">
+                    {count}
+                  </span>
+                )}
+                {tab === t.id && (
+                  <span className="absolute bottom-0 left-2 right-2 h-[3px] rounded-full bg-hood" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6 py-4 pb-12">
+        {/* —— ITEMS —— */}
+        {tab === 'items' && (
+          <div>
+            {sweepMode && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-hood/30 bg-hood-muted px-3 py-2">
+                <ShoppingCart className="w-4 h-4 text-hood" />
+                <span className="text-sm font-semibold text-ink">Sweep mode</span>
+                <span className="text-xs text-ink-2">{sweepable.length} listed available</span>
+                <div className="flex flex-wrap gap-1.5 ml-auto">
+                  {[3, 5, 10].map((n) => (
+                    <Button key={n} size="sm" variant="secondary" onClick={() => selectFloor(n)}>
+                      Top {n}
+                    </Button>
+                  ))}
+                  <Button size="sm" variant="secondary" onClick={selectAllListed}>
+                    All
+                  </Button>
+                  {selected.size > 0 && (
+                    <Button size="sm" variant="ghost" onClick={clearSelection}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Sticky toolbar */}
+            <div className="sticky top-[6.75rem] z-20 -mx-1 px-1 py-2 mb-3 bg-surface/95 backdrop-blur-md flex flex-wrap items-center gap-2 border-b border-edge">
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.matchMedia('(min-width: 1024px)').matches) {
+                    setSidebarOpen((o) => !o)
+                  } else {
+                    setMobileFilters(true)
+                  }
+                }}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border text-sm font-medium cursor-pointer transition-colors',
+                  sidebarOpen || filterCount > 0
+                    ? 'border-hood/40 bg-hood-muted text-hood'
+                    : 'border-edge bg-surface-2 text-ink'
+                )}
+              >
+                <Filter className="w-3.5 h-3.5" />
+                Filters
+                {filterCount > 0 && (
+                  <span className="px-1.5 rounded-md bg-hood text-[#0b0e11] text-[10px] font-bold">
+                    {filterCount}
+                  </span>
+                )}
+              </button>
+
+              <div className="hidden sm:block text-xs text-ink-3">
+                {items.length.toLocaleString()} item{items.length === 1 ? '' : 's'}
+              </div>
+
+              <div className="flex items-center gap-2 ml-auto">
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  className="h-9 px-3 rounded-xl bg-surface-2 border border-edge text-sm text-ink max-w-[160px]"
+                >
+                  <option value="price_asc">Price low to high</option>
+                  <option value="price_desc">Price high to low</option>
+                  <option value="rarity_asc">Rarity rare first</option>
+                  <option value="rarity_desc">Rarity common first</option>
+                  <option value="id">Token ID</option>
+                </select>
+
+                <div className="flex rounded-xl border border-edge bg-surface-2 p-0.5">
+                  {(
+                    [
+                      { id: 'sm' as const, icon: LayoutGrid, title: 'Small' },
+                      { id: 'md' as const, icon: Grid3x3, title: 'Medium' },
+                      { id: 'lg' as const, icon: Grid2x2, title: 'Large' },
+                    ] as const
+                  ).map(({ id, icon: Icon, title }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      title={title}
+                      onClick={() => setGrid(id)}
+                      className={clsx(
+                        'w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer',
+                        grid === id ? 'bg-surface text-hood shadow-sm' : 'text-ink-3 hover:text-ink'
+                      )}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </button>
+                  ))}
+                </div>
+
+                {!sweepMode && (
+                  <Button size="sm" variant="outline" onClick={() => setSweepMode(true)}>
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span className="hidden md:inline">Sweep</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <div
+              className={clsx(
+                'grid gap-4',
+                sidebarOpen ? 'lg:grid-cols-[260px_1fr]' : 'lg:grid-cols-1'
+              )}
+            >
+              {sidebarOpen && (
+                <div className="hidden lg:block">
+                  <div className="sticky top-[10.5rem]">
+                    <TraitFilterPanel
+                      stats={traitStats}
+                      filters={filters}
+                      onChange={onFiltersChange}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                {items.length === 0 ? (
+                  <div className="rounded-2xl border border-edge py-20 text-center">
+                    <p className="text-ink font-medium">No items found</p>
+                    <p className="text-sm text-ink-3 mt-1">Try clearing trait filters</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-4"
+                      onClick={() => onFiltersChange({})}
+                    >
+                      Clear filters
+                    </Button>
+                  </div>
+                ) : (
+                  <div className={clsx('grid', gridClass[grid])}>
+                    {items.map((n) => {
+                      const rank = rarityMap.get(n.id)?.rarityRank
+                      const canSelect =
+                        sweepMode && n.listed && n.price != null && n.owner !== user
+                      return (
+                        <div key={n.id} className="relative">
+                          {rank != null && !sweepMode && (
+                            <div className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded-md bg-black/55 backdrop-blur text-white text-[10px] font-bold tabular-nums">
+                              #{rank}
+                            </div>
+                          )}
+                          {sweepMode ? (
+                            canSelect ? (
+                              <NftCard
+                                nft={n}
+                                showCollection={false}
+                                selectable
+                                selected={selected.has(n.id)}
+                                onSelect={toggleSelect}
+                                compact={grid === 'sm'}
+                              />
+                            ) : (
+                              <div className="opacity-35 pointer-events-none">
+                                <NftCard nft={n} showCollection={false} compact={grid === 'sm'} />
+                              </div>
+                            )
+                          ) : (
+                            <NftCard nft={n} showCollection={false} compact={grid === 'sm'} />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* —— OFFERS —— */}
+        {tab === 'offers' && (
+          <div className="rounded-2xl border border-edge overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-edge bg-surface-2">
+              <h2 className="text-sm font-bold text-ink">Offers</h2>
+              <Button size="sm" onClick={() => setOfferOpen(true)}>
+                Make collection offer
+              </Button>
+            </div>
+            <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3 border-b border-edge">
+              <div className="col-span-2">Type</div>
+              <div className="col-span-3">Item</div>
+              <div className="col-span-2">Price</div>
+              <div className="col-span-1">Qty</div>
+              <div className="col-span-2">From</div>
+              <div className="col-span-2">Expires</div>
+            </div>
+            {colOffers.length === 0 && (
+              <div className="py-16 text-center">
+                <p className="text-ink font-medium">No offers yet</p>
+                <p className="text-sm text-ink-3 mt-1">Be the first to make an offer</p>
+                <Button size="sm" className="mt-4" onClick={() => setOfferOpen(true)}>
+                  Make offer
+                </Button>
+              </div>
+            )}
+            {colOffers.map((o) => {
+              const nft = o.nftId ? nfts.find((n) => n.id === o.nftId) : undefined
+              return (
+                <div
+                  key={o.id}
+                  className="grid grid-cols-2 sm:grid-cols-12 gap-2 px-4 py-3.5 text-sm border-b border-edge last:border-0 items-center hover:bg-surface-2/50"
+                >
+                  <div className="sm:col-span-2">
+                    <Badge tone={o.type === 'collection' ? 'blue' : 'green'}>
+                      {o.type === 'collection' ? 'Collection' : 'Item'}
+                    </Badge>
+                  </div>
+                  <div className="sm:col-span-3 flex items-center gap-2 min-w-0">
+                    {nft && (
+                      <img src={nft.image} alt="" className="w-8 h-8 rounded-lg object-cover" />
+                    )}
+                    <span className="truncate font-medium text-ink">
+                      {nft ? nft.name : collection.name}
+                    </span>
+                  </div>
+                  <div className="sm:col-span-2 font-bold text-hood tabular-nums">
+                    {formatPrice(o.price)} ETH
+                  </div>
+                  <div className="sm:col-span-1 text-ink-2">{o.quantity ?? 1}</div>
+                  <div className="sm:col-span-2 text-ink-3 font-mono text-xs truncate">
+                    {o.offerer}
+                  </div>
+                  <div className="sm:col-span-2 text-ink-3 text-xs">
+                    {timeAgo(o.createdAt)} · exp {timeAgo(o.expiresAt).replace(' ago', '')}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* —— INSIGHTS —— */}
+        {tab === 'insights' && (
+          <CollectionInsights
+            activities={colActivity}
+            floorPrice={collection.floorPrice}
+            collectionId={collection.id}
+            intervals={collection.intervals}
+            openseaUrl={collection.openseaUrl}
+            collectionName={collection.name}
+            source={collection.source}
+          />
+        )}
+
+        {/* —— ANALYTICS —— */}
+        {tab === 'analytics' && (
+          <CollectionAnalytics
+            nfts={collectionNfts}
+            activities={colActivity}
+            floorPrice={collection.floorPrice}
+            volume24h={collection.volume24h}
+            volumeTotal={collection.volumeTotal}
+            owners={collection.owners}
+            itemsTotal={collection.items}
+          />
+        )}
+
+        {/* —— ACTIVITY —— */}
+        {tab === 'activity' && (
+          <div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+              <div>
+                <h2 className="text-sm font-bold text-ink">Activity</h2>
+                <p className="text-xs text-ink-3">Only activity for {collection.name}</p>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {activityFilters.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setActivityFilter(f.id)}
+                    className={clsx(
+                      'px-2.5 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-colors',
+                      activityFilter === f.id
+                        ? 'bg-hood text-[#0b0e11]'
+                        : 'bg-surface-2 text-ink-2 border border-edge hover:text-ink'
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-edge overflow-hidden">
+              {filteredActivity.length === 0 ? (
+                <p className="p-12 text-center text-ink-3 text-sm">No activity yet</p>
+              ) : (
+                filteredActivity.map((a) => <ActivityRow key={a.id} activity={a} />)
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* —— TRAITS —— */}
+        {tab === 'traits' && (
+          <div className="space-y-4">
+            <p className="text-sm text-ink-2">
+              Trait rarity for this collection. Click a value to filter items.
+            </p>
+            <div className="grid md:grid-cols-2 gap-3">
+              {traitStats.map((stat) => (
+                <div
+                  key={stat.trait_type}
+                  className="rounded-2xl border border-edge overflow-hidden bg-surface"
+                >
+                  <div className="px-4 py-2.5 bg-surface-2 border-b border-edge flex items-center justify-between">
+                    <span className="font-semibold text-sm text-ink">{stat.trait_type}</span>
+                    <span className="text-xs text-ink-3">{stat.values.length} values</span>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto divide-y divide-[var(--color-border)]">
+                    {stat.values.map((v, i) => (
+                      <button
+                        key={v.value}
+                        type="button"
+                        onClick={() => {
+                          onFiltersChange({ [stat.trait_type]: [v.value] })
+                          setTab('items')
+                          setSidebarOpen(true)
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-surface-2 cursor-pointer text-sm"
+                      >
+                        <span className="w-6 text-[11px] font-bold text-ink-3 tabular-nums">
+                          {i + 1}
+                        </span>
+                        <span className="flex-1 font-medium text-ink truncate">{v.value}</span>
+                        <span className="text-xs text-ink-3 tabular-nums">{v.count}</span>
+                        <Badge tone={v.rarity < 15 ? 'green' : 'muted'}>
+                          {v.rarity.toFixed(1)}%
+                        </Badge>
+                        <span className="text-xs font-semibold text-hood tabular-nums w-14 text-right">
+                          {v.floor != null ? formatPrice(v.floor) : '—'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sticky sweep cart */}
+      {sweepMode && selected.size > 0 && (
+        <div className="fixed bottom-0 inset-x-0 z-40 border-t border-edge bg-surface/95 backdrop-blur-xl shadow-[0_-8px_30px_rgba(0,0,0,0.15)]">
+          <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-6 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1 min-w-0 flex items-center gap-3">
+              <div className="flex -space-x-2">
+                {selectedNfts.slice(0, 4).map((n) => (
+                  <img
+                    key={n.id}
+                    src={n.image}
+                    alt=""
+                    className="w-9 h-9 rounded-lg border-2 border-surface object-cover"
+                  />
+                ))}
+              </div>
+              <div>
+                <div className="text-sm font-bold text-ink">
+                  {selected.size} item{selected.size === 1 ? '' : 's'}
+                </div>
+                <div className="text-xs text-ink-3">
+                  Sweep {collection.name} · avg {formatPrice(sweepTotal / selected.size)} ETH
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <div className="text-[10px] uppercase text-ink-3">Total</div>
+                <div className="text-lg font-extrabold text-ink tabular-nums">
+                  {formatPrice(sweepTotal)} <span className="text-hood text-sm">ETH</span>
+                </div>
+              </div>
+              <Button size="lg" onClick={doSweep}>
+                <ShoppingCart className="w-4 h-4" />
+                Buy now
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile filters */}
+      {mobileFilters && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileFilters(false)} />
+          <div className="absolute inset-y-0 left-0 w-[min(100%,340px)] bg-surface shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-3 py-3 border-b border-edge">
+              <span className="font-bold text-ink">Filters</span>
+              <button
+                type="button"
+                onClick={() => setMobileFilters(false)}
+                className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-surface-2 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <TraitFilterPanel
+                stats={traitStats}
+                filters={filters}
+                onChange={onFiltersChange}
+                className="border-0 rounded-none"
+              />
+            </div>
+            <div className="p-3 border-t border-edge">
+              <Button fullWidth onClick={() => setMobileFilters(false)}>
+                Show {items.length} items
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <OfferModal
+        open={offerOpen}
+        onClose={() => setOfferOpen(false)}
+        collectionId={collection.id}
+        collectionName={collection.name}
+        floorPrice={collection.floorPrice}
+        collectionOfferOnly
+      />
+    </div>
+  )
+}

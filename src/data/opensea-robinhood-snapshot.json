@@ -1,0 +1,1028 @@
+[
+  {
+    "slug": "onchainhoodies-",
+    "collection": {
+      "collection": "onchainhoodies-",
+      "name": "OnChainHoodies",
+      "description": "The fully on-chain neighborhood of Web3",
+      "image_url": "https://i2c.seadn.io/collection/onchainhoodies-587016624/image_type_logo/0c1d894db3c6684ec879891f20fb79/cb0c1d894db3c6684ec879891f20fb79.png",
+      "banner_image_url": "https://i2c.seadn.io/collection/onchainhoodies-/image_type_hero_desktop/b2801d2f42d821f8c751d034085cd5/91b2801d2f42d821f8c751d034085cd5.png?fit=inside",
+      "owner": "0xc7c165ba3fcf9244a45977d4809202b1dc803941",
+      "safelist_status": "verified",
+      "category": "art",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/onchainhoodies-",
+      "project_url": "https://www.onchainhoodies.xyz/",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "OnChainHoodies",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x9ec6c5b9f572a9b02138e553bc5f5882da735f45",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0xc7c165ba3fcf9244a45977d4809202b1dc803941"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 6,
+          "recipient": "0xc7c165ba3fcf9244a45977d4809202b1dc803941",
+          "required": true
+        }
+      ],
+      "required_zone": "0x000056f7000000ece9003ca63978907a00ffd100",
+      "rarity": {
+        "calculated_at": "2026-07-16T06:50:08.292104",
+        "max_rank": 5999,
+        "total_supply": 5999,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 5999,
+      "unique_item_count": 5999,
+      "created_date": "2026-07-10",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1918.95"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1918.95"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 241.4170152206584,
+        "sales": 9411,
+        "num_owners": 1723,
+        "floor_price": 0.0239999,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 8.960734306722001,
+          "sales": 414
+        },
+        {
+          "interval": "seven_day",
+          "volume": 241.41701522065856,
+          "sales": 9411
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 241.41701522065864,
+          "sales": 9411
+        }
+      ]
+    }
+  },
+  {
+    "slug": "gremlin-cartel",
+    "collection": {
+      "collection": "gremlin-cartel",
+      "name": "Gremlin Cartel",
+      "description": "Hidden beneath the surface, the Gremlins spent years building their world in silence. Now, the Hideout is open.\n\nGremlins is a collection of 5,000 handcrafted pixel-art NFTs on Robinhood Chain. Every Gremlin is uniquely assembled with its own personality, traits, and story, forming a community driven by creativity, culture, and curiosity.\n\nMore than a collection, Gremlins is the beginning of a recognizable NFT brand built around memorable characters, community-first experiences, and long-term ecosystem growth.\n\nWelcome to the Hideout.",
+      "image_url": "https://i2c.seadn.io/collection/gremlin-cartel/image_type_logo/af7be2dd5352ef3aaeaae07d76a71a/aaaf7be2dd5352ef3aaeaae07d76a71a.jpeg",
+      "banner_image_url": "https://raw2.seadn.io/collection/gremlin-cartel/image_type_hero_desktop/5e683dc825c64ca96afd5bc927a467/935e683dc825c64ca96afd5bc927a467.mp4",
+      "owner": "0xfac2c5e7b3ed88cafd831fde58229d7bf0f73ef4",
+      "safelist_status": "verified",
+      "category": "gaming",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/gremlin-cartel",
+      "project_url": "https://www.gremilincartel.xyz/",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "GremlinCartel",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x12449b9a29865621be166aaff04dc14a640b4119",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0x93e7bb4dfffef46fb6b0512158a4024aa96c6c69",
+        "0xfac2c5e7b3ed88cafd831fde58229d7bf0f73ef4"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 7,
+          "recipient": "0x899be4fd3f0524656c1c030cf96080ee763c00a4",
+          "required": true
+        }
+      ],
+      "required_zone": "0x000056f7000000ece9003ca63978907a00ffd100",
+      "rarity": {
+        "calculated_at": "2026-07-16T06:51:58.909876",
+        "max_rank": 5000,
+        "total_supply": 5000,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 5000,
+      "unique_item_count": 5000,
+      "created_date": "2026-07-05",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 253.78627869624788,
+        "sales": 16909,
+        "num_owners": 1334,
+        "floor_price": 0.0209521,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 6.864524024140767,
+          "sales": 474
+        },
+        {
+          "interval": "seven_day",
+          "volume": 162.40865595730034,
+          "sales": 3434
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 253.7862786962473,
+          "sales": 16910
+        }
+      ]
+    }
+  },
+  {
+    "slug": "robinhood-punks",
+    "collection": {
+      "collection": "robinhood-punks",
+      "name": "Robinhood Punks",
+      "description": "",
+      "image_url": "https://i2c.seadn.io/collection/robinhood-punks/image_type_logo/4afd4a32b01cddd945d23e60c66d95/f94afd4a32b01cddd945d23e60c66d95.jpeg",
+      "banner_image_url": "https://i2c.seadn.io/admin-uploads/4e78549d01806cbe3a3494ce123c78/2a4e78549d01806cbe3a3494ce123c78.png?fit=inside",
+      "owner": "0x3e0bfa7daaa01c6da0a582222b0077021a8b0a75",
+      "safelist_status": "verified",
+      "category": "pfps",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": false,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/robinhood-punks",
+      "project_url": "",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "RobinhoodPunks",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0xf08c65564eb07d880021105489552080b08e4319",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0x3e0bfa7daaa01c6da0a582222b0077021a8b0a75"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        }
+      ],
+      "rarity": {
+        "calculated_at": "2026-07-16T06:52:25.942931",
+        "max_rank": 9760,
+        "total_supply": 10000,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 10000,
+      "unique_item_count": 10000,
+      "created_date": "2026-06-28",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 94.58986868617912,
+        "sales": 14099,
+        "num_owners": 1578,
+        "floor_price": 0.002538,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 1.3880191995809,
+          "sales": 467
+        },
+        {
+          "interval": "seven_day",
+          "volume": 89.406508107185,
+          "sales": 10453
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 94.58986868617899,
+          "sales": 14099
+        }
+      ]
+    }
+  },
+  {
+    "slug": "robinhood-pengs",
+    "collection": {
+      "collection": "robinhood-pengs",
+      "name": "Robinhood Pengs",
+      "description": "Robinhood Pengs [MINT](https://robin-pengs.nfts2.me/)",
+      "image_url": "https://i2c.seadn.io/robinhood/14d0872dc83f48ff98295ea289175d77/0fc2038934df78d1cc5b43a517fede/f40fc2038934df78d1cc5b43a517fede.gif",
+      "banner_image_url": "https://i2c.seadn.io/robinhood/14d0872dc83f48ff98295ea289175d77/82058cd6a90cee33e2ee492ff02fbc/f182058cd6a90cee33e2ee492ff02fbc.webp?fit=inside",
+      "owner": "0xaa891dac72bcc9401256529ff5e5dfd7287cd403",
+      "safelist_status": "not_requested",
+      "category": "pfps",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/robinhood-pengs",
+      "project_url": "https://robin-pengs.nfts2.me/",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "zetapenguins",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x23809acda371d01705d066f40bfdbdaba6a59ed8",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0xaa891dac72bcc9401256529ff5e5dfd7287cd403"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 7,
+          "recipient": "0x8b07c9919e02d8885f1465d7b40dd172ec1233a1",
+          "required": false
+        }
+      ],
+      "rarity": {
+        "calculated_at": "2026-07-16T06:52:28.620161",
+        "max_rank": 9346,
+        "total_supply": 9346,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 9346,
+      "unique_item_count": 9346,
+      "created_date": "2026-07-02",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 2.5320637756255526,
+        "sales": 3606,
+        "num_owners": 3969,
+        "floor_price": 0.000499,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 0.12267327398600004,
+          "sales": 326
+        },
+        {
+          "interval": "seven_day",
+          "volume": 1.9534423856261602,
+          "sales": 3040
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 2.5320637756255575,
+          "sales": 3606
+        }
+      ]
+    }
+  },
+  {
+    "slug": "robinhoodmigos",
+    "collection": {
+      "collection": "robinhoodmigos",
+      "name": "Robinhood Migos",
+      "description": "Robinhood Migos is a collection of 5,555 handmade pixel characters.",
+      "image_url": "https://i2c.seadn.io/collection/robinhood-migos/image_type_logo/c9806ee8f5df444fe6062e333e2cca/43c9806ee8f5df444fe6062e333e2cca.png",
+      "banner_image_url": "https://i2c.seadn.io/collection/robinhoodmigos/image_type_hero_desktop/0266251e0319f0ed1291980cbd3f86/910266251e0319f0ed1291980cbd3f86.png?fit=inside",
+      "owner": "0x2c476e5c706fa1fbd012fb31fd54ea8736f537b2",
+      "safelist_status": "not_requested",
+      "category": "art",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/robinhoodmigos",
+      "project_url": "",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "RobinhoodMigos",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x5942f3bba2efaeda47c1ef88505e526b9c8f80f5",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0x2c476e5c706fa1fbd012fb31fd54ea8736f537b2"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 10,
+          "recipient": "0xbe84712cfdcf268637d9e70107a971814e483150",
+          "required": true
+        }
+      ],
+      "required_zone": "0x000056f7000000ece9003ca63978907a00ffd100",
+      "rarity": {
+        "calculated_at": "2026-07-16T06:52:41.205171",
+        "max_rank": 5555,
+        "total_supply": 5555,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 5555,
+      "unique_item_count": 5555,
+      "created_date": "2026-07-10",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.59"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.59"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 0.8835011335569134,
+        "sales": 7124,
+        "num_owners": 536,
+        "floor_price": 0.00017,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 0.013689999999999999,
+          "sales": 124
+        },
+        {
+          "interval": "seven_day",
+          "volume": 0.8835011335569027,
+          "sales": 7124
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 0.8835011335569121,
+          "sales": 7124
+        }
+      ]
+    }
+  },
+  {
+    "slug": "py0py0py0py0",
+    "collection": {
+      "collection": "py0py0py0py0",
+      "name": "pyopyopyopyo",
+      "description": "sweet little things, melt right in your heart ♡\n",
+      "image_url": "https://i2c.seadn.io/collection/pyopyopyopyo-13242225/image_type_logo/6b7385348bbe1bf7cea1d9565f0955/676b7385348bbe1bf7cea1d9565f0955.png",
+      "banner_image_url": "https://i2c.seadn.io/collection/py0py0py0py0/image_type_hero_desktop/33de500c87e764bea255e171036263/d533de500c87e764bea255e171036263.png?fit=inside",
+      "owner": "0x4218aa8bf67797bcf6294fe42e87472bcff55967",
+      "safelist_status": "verified",
+      "category": "pfps",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/py0py0py0py0",
+      "project_url": "",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "pyopyopyo410",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x08dc7cb3f4ccc8eea782e2924d151e2130f22b28",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0x4218aa8bf67797bcf6294fe42e87472bcff55967"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 6,
+          "recipient": "0x4218aa8bf67797bcf6294fe42e87472bcff55967",
+          "required": true
+        }
+      ],
+      "required_zone": "0x000056f7000000ece9003ca63978907a00ffd100",
+      "rarity": {
+        "calculated_at": "2026-07-16T06:52:15.301901",
+        "max_rank": 4444,
+        "total_supply": 4444,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 4444,
+      "unique_item_count": 4444,
+      "created_date": "2026-07-10",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 100.01480608609214,
+        "sales": 9254,
+        "num_owners": 1882,
+        "floor_price": 0.0161,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 7.809616691366893,
+          "sales": 425
+        },
+        {
+          "interval": "seven_day",
+          "volume": 100.0148060860914,
+          "sales": 9254
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 100.01480608609154,
+          "sales": 9254
+        }
+      ]
+    }
+  },
+  {
+    "slug": "ascii-cats-robinhood",
+    "collection": {
+      "collection": "ascii-cats-robinhood",
+      "name": "ASCII CATS",
+      "description": "",
+      "image_url": "https://i2c.seadn.io/collection/ascii-cats-747247159/image_type_logo/ad0b2e541d64ce3c39fdf3bcf05d0d/59ad0b2e541d64ce3c39fdf3bcf05d0d.png",
+      "banner_image_url": "https://i2c.seadn.io/collection/ascii-cats-robinhood/image_type_hero_desktop/a9012b77efb0753d23d6daf754e282/e4a9012b77efb0753d23d6daf754e282.png?fit=inside",
+      "owner": "0x8a7729992b1c2f5c31d1ec7822011f3c4cec5f9f",
+      "safelist_status": "not_requested",
+      "category": "art",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/ascii-cats-robinhood",
+      "project_url": "",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "ASCIIcats_",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0xd2e2342e605d9576d788b3c4e1026dc54528987f",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0x8a7729992b1c2f5c31d1ec7822011f3c4cec5f9f"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 7.5,
+          "recipient": "0x8a7729992b1c2f5c31d1ec7822011f3c4cec5f9f",
+          "required": true
+        }
+      ],
+      "required_zone": "0x000056f7000000ece9003ca63978907a00ffd100",
+      "rarity": {
+        "calculated_at": "2026-07-16T06:51:58.375402",
+        "max_rank": 3333,
+        "total_supply": 3333,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 3333,
+      "unique_item_count": 3333,
+      "created_date": "2026-07-15",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 11.010621528837618,
+        "sales": 5350,
+        "num_owners": 1882,
+        "floor_price": 0.0028,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 11.010621528837572,
+          "sales": 5350
+        },
+        {
+          "interval": "seven_day",
+          "volume": 11.010621528837577,
+          "sales": 5350
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 11.010621528837618,
+          "sales": 5350
+        }
+      ]
+    }
+  },
+  {
+    "slug": "robbin-hood-babies",
+    "collection": {
+      "collection": "robbin-hood-babies",
+      "name": "ROBBIN HOOD BABIES",
+      "description": "The culture collection of Robinhood Chain\n\n$HOODIO: First V4 hook NFTs on the chain. First DN404's on chain.\n\n8888 Hoodios. \n\nHold 1M $HOODIO = 1 in your wallet",
+      "image_url": "https://i2c.seadn.io/collection/robbin-hood-babies/image_type_logo/79e93e38d24d2d1d247628aea44905/2a79e93e38d24d2d1d247628aea44905.png",
+      "banner_image_url": "https://raw2.seadn.io/collection/robbin-hood-babies/image_type_hero_desktop/ed06f073161e4bbd74fd52ed1d5797/16ed06f073161e4bbd74fd52ed1d5797.mp4",
+      "owner": "0x3f2b83e07edcedc97d999de884b1fc37b701007e",
+      "safelist_status": "not_requested",
+      "category": "pfps",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/robbin-hood-babies",
+      "project_url": "https://hoodios.art",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "RBHoodios",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x96a4e9032c1c4049c6b8a48b432e42350b4e2074",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0x3f2b83e07edcedc97d999de884b1fc37b701007e"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 5,
+          "recipient": "0xc577f41242818cd4109259c5bab06f2bcea34bd7",
+          "required": false
+        }
+      ],
+      "rarity": {
+        "calculated_at": "2026-07-16T06:52:05.104265",
+        "max_rank": 4764,
+        "total_supply": 4750,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 4750,
+      "unique_item_count": 4750,
+      "created_date": "2026-07-09",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 54.67441335155402,
+        "sales": 1056,
+        "num_owners": 575,
+        "floor_price": 0.085,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 7.9556449194919505,
+          "sales": 80
+        },
+        {
+          "interval": "seven_day",
+          "volume": 54.674413351553966,
+          "sales": 1056
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 54.67441335155402,
+          "sales": 1056
+        }
+      ]
+    }
+  },
+  {
+    "slug": "hoodiliosnft",
+    "collection": {
+      "collection": "hoodiliosnft",
+      "name": "Hoodilios",
+      "description": "Culture pfps on robinhood. \n\nNot affiliated with robinhood",
+      "image_url": "https://i2c.seadn.io/collection/hoodilios-305972298/image_type_logo/b2863cd71686164fd98032b280bba5/f1b2863cd71686164fd98032b280bba5.jpeg",
+      "banner_image_url": "https://i2c.seadn.io/collection/hoodiliosnft/image_type_hero_desktop/f28d42569a1991838dc725120c2a8a/27f28d42569a1991838dc725120c2a8a.jpeg?fit=inside",
+      "owner": "0xdc18995dcb3ae894ba8bf2c4673d7122614fba4b",
+      "safelist_status": "not_requested",
+      "category": "pfps",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/hoodiliosnft",
+      "project_url": "",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "",
+      "twitter_username": "Hoodilios",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x325ecdf5cfa0cc1c138eb0cbed1f877882e4f7a5",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0xdc18995dcb3ae894ba8bf2c4673d7122614fba4b"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 5,
+          "recipient": "0xdc18995dcb3ae894ba8bf2c4673d7122614fba4b",
+          "required": true
+        }
+      ],
+      "required_zone": "0x000056f7000000ece9003ca63978907a00ffd100",
+      "total_supply": 6169,
+      "unique_item_count": 6169,
+      "created_date": "2026-07-13",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1919.34"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 19.699396472913207,
+        "sales": 13887,
+        "num_owners": 1302,
+        "floor_price": 0.0021999,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 2.2734126765039155,
+          "sales": 798
+        },
+        {
+          "interval": "seven_day",
+          "volume": 19.69939647291323,
+          "sales": 13887
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 19.6993964729132,
+          "sales": 13887
+        }
+      ]
+    }
+  },
+  {
+    "slug": "hoodini",
+    "collection": {
+      "collection": "hoodini",
+      "name": "Hoodini",
+      "description": "Hoodini is a curious little mage who wanders the enchanted forests of the Robinhood blockchain. Born in 1169 CE, he lives in a whimsical world inspired by the legends of Robin Hood, where magic, adventure, and mystery are part of everyday life.\n\nAlways carrying a spell or two, Hoodini loves practicing new magic, collecting strange artifacts, and helping his friends in the most unexpected ways. With his glowing eyes, oversized hood, and playful spirit, he's always ready for the next magical adventure.",
+      "image_url": "https://i2c.seadn.io/collection/hoodini/image_type_logo/2d2aaa07da01eeb098626ddaba1774/c22d2aaa07da01eeb098626ddaba1774.png",
+      "banner_image_url": "https://i2c.seadn.io/collection/hoodini/image_type_hero_desktop/3ddae0b7515917dae3c41a3613659a/2a3ddae0b7515917dae3c41a3613659a.png?fit=inside",
+      "owner": "0x6f61f06778ba9ea825fc5328b1e68c0fc20b8fe9",
+      "safelist_status": "approved",
+      "category": "pfps",
+      "is_disabled": false,
+      "is_nsfw": false,
+      "trait_offers_enabled": true,
+      "collection_offers_enabled": true,
+      "opensea_url": "https://opensea.io/collection/hoodini",
+      "project_url": "https://robin-the-hoodini.lovable.app/",
+      "wiki_url": "",
+      "discord_url": "",
+      "telegram_url": "https://t.me/hoodiniportal",
+      "twitter_username": "ROBINTHEHOODINI",
+      "instagram_username": "",
+      "contracts": [
+        {
+          "address": "0x603d1a631da50034db1e04e9e2308951e70af714",
+          "chain": "robinhood"
+        }
+      ],
+      "editors": [
+        "0x6f61f06778ba9ea825fc5328b1e68c0fc20b8fe9"
+      ],
+      "fees": [
+        {
+          "fee": 1,
+          "recipient": "0x0000a26b00c1f0df003000390027140000faa719",
+          "required": true
+        },
+        {
+          "fee": 5,
+          "recipient": "0x6f61f06778ba9ea825fc5328b1e68c0fc20b8fe9",
+          "required": true
+        }
+      ],
+      "required_zone": "0x000056f7000000ece9003ca63978907a00ffd100",
+      "rarity": {
+        "calculated_at": "2026-07-16T06:54:22.206928",
+        "max_rank": 1169,
+        "total_supply": 1169,
+        "strategy_id": "openrarity",
+        "strategy_version": "1.0"
+      },
+      "total_supply": 1169,
+      "unique_item_count": 1169,
+      "created_date": "2026-07-08",
+      "pricing_currencies": {
+        "listing_currency": {
+          "symbol": "ETH",
+          "address": "0x0000000000000000000000000000000000000000",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/ETH.svg",
+          "name": "ETH",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1920.08"
+        },
+        "offer_currency": {
+          "symbol": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "chain": "robinhood",
+          "image": "https://raw2.seadn.io/currency_logos/WETH.svg",
+          "name": "Wrapped Ethereum",
+          "decimals": 18,
+          "eth_price": "1",
+          "usd_price": "1920.08"
+        }
+      }
+    },
+    "stats": {
+      "total": {
+        "volume": 25.349604173793757,
+        "sales": 2909,
+        "num_owners": 381,
+        "floor_price": 0.00487,
+        "floor_price_symbol": "ETH"
+      },
+      "intervals": [
+        {
+          "interval": "one_day",
+          "volume": 0.16472939999800001,
+          "sales": 33
+        },
+        {
+          "interval": "seven_day",
+          "volume": 25.349604173793775,
+          "sales": 2909
+        },
+        {
+          "interval": "thirty_day",
+          "volume": 25.349604173793786,
+          "sales": 2909
+        }
+      ]
+    }
+  }
+]

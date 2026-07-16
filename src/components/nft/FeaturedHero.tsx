@@ -1,0 +1,191 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { BadgeCheck, ChevronLeft, ChevronRight, ShoppingBag, Sparkles } from 'lucide-react'
+import type { Collection } from '../../types'
+import { formatPrice } from '../../data/mockData'
+import { Button } from '../ui/Button'
+import clsx from 'clsx'
+
+export function FeaturedHero({ collections }: { collections: Collection[] }) {
+  const slides = collections.slice(0, 5)
+  const [index, setIndex] = useState(0)
+  const [paused, setPaused] = useState(false)
+
+  useEffect(() => {
+    if (slides.length <= 1 || paused) return
+    const t = setInterval(() => setIndex((i) => (i + 1) % slides.length), 5000)
+    return () => clearInterval(t)
+  }, [slides.length, paused])
+
+  if (slides.length === 0) return null
+
+  const active = slides[index]
+
+  const prev = () => setIndex((i) => (i - 1 + slides.length) % slides.length)
+  const next = () => setIndex((i) => (i + 1) % slides.length)
+
+  return (
+    <section
+      className="relative w-full rounded-2xl md:rounded-3xl overflow-hidden border border-edge group/hero"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      {/* Slides */}
+      <div className="relative h-[280px] sm:h-[340px] md:h-[400px] lg:h-[440px]">
+        {slides.map((c, i) => (
+          <div
+            key={c.id}
+            className={clsx(
+              'absolute inset-0 transition-all duration-700 ease-out',
+              i === index ? 'opacity-100 scale-100 z-10' : 'opacity-0 scale-105 z-0 pointer-events-none'
+            )}
+          >
+            <img
+              src={c.banner}
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            {/* OpenSea-style multi-stop gradient */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/10" />
+            <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
+            {/* Subtle green tint for Robinhood brand */}
+            <div className="absolute inset-0 bg-gradient-to-tr from-[rgba(0,200,5,0.12)] via-transparent to-transparent" />
+          </div>
+        ))}
+
+        {/* Content */}
+        <div className="absolute inset-0 z-20 flex flex-col justify-end p-5 sm:p-8 md:p-10">
+          <div className="flex items-end justify-between gap-4">
+            <div className="min-w-0 max-w-2xl">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-white text-[11px] font-semibold uppercase tracking-wider mb-3">
+                <Sparkles className="w-3 h-3 text-hood" />
+                Discover
+              </div>
+
+              <div className="flex items-center gap-3 sm:gap-4">
+                <img
+                  src={active.image}
+                  alt=""
+                  className="w-14 h-14 sm:w-16 sm:h-16 md:w-[72px] md:h-[72px] rounded-2xl border-2 border-white/30 shadow-2xl object-cover ring-2 ring-hood/40"
+                />
+                <div className="min-w-0">
+                  <Link
+                    to={`/collection/${active.slug}`}
+                    className="flex items-center gap-2 group/title"
+                  >
+                    <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight truncate drop-shadow-lg group-hover/title:text-hood transition-colors">
+                      {active.name}
+                    </h2>
+                    {active.verified && (
+                      <BadgeCheck className="w-6 h-6 sm:w-7 sm:h-7 text-hood shrink-0 drop-shadow" />
+                    )}
+                  </Link>
+                  <p className="mt-1 text-sm text-white/70 line-clamp-2 max-w-lg hidden sm:block">
+                    {active.description}
+                  </p>
+                </div>
+              </div>
+
+              {/* Stats chips */}
+              <div className="mt-4 flex flex-wrap gap-2 sm:gap-3">
+                <StatChip label="Floor" value={`${formatPrice(active.floorPrice)} ETH`} highlight />
+                <StatChip label="24h volume" value={`${formatPrice(active.volume24h)} ETH`} />
+                <StatChip label="Items" value={active.items.toLocaleString()} />
+                <StatChip label="Owners" value={active.owners.toLocaleString()} />
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-2.5">
+                <Link to={`/collection/${active.slug}`}>
+                  <Button size="lg" className="shadow-lg shadow-hood/25">
+                    View collection
+                  </Button>
+                </Link>
+                <Link to={`/degen/bulk?collection=${active.slug}`}>
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    className="!bg-white/10 !text-white border border-white/20 hover:!bg-white/20 backdrop-blur-md"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    Degen bulk
+                  </Button>
+                </Link>
+              </div>
+            </div>
+
+            {/* Rank badge */}
+            <div className="hidden md:flex flex-col items-end gap-2 shrink-0 pb-1">
+              <div className="px-3 py-1.5 rounded-full bg-hood text-[#0b0e11] text-xs font-bold shadow-lg shadow-hood/30">
+                #{index + 1} Trending
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Nav arrows */}
+        {slides.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={prev}
+              className="absolute left-3 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur border border-white/15 text-white flex items-center justify-center opacity-0 group-hover/hero:opacity-100 transition-opacity cursor-pointer"
+              aria-label="Previous"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              onClick={next}
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-30 w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur border border-white/15 text-white flex items-center justify-center opacity-0 group-hover/hero:opacity-100 transition-opacity cursor-pointer"
+              aria-label="Next"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Dots + progress */}
+      {slides.length > 1 && (
+        <div className="absolute bottom-0 left-0 right-0 z-30 flex justify-center gap-1.5 pb-3 pointer-events-none">
+          {slides.map((c, i) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setIndex(i)}
+              className={clsx(
+                'h-1 rounded-full transition-all pointer-events-auto cursor-pointer',
+                i === index ? 'w-8 bg-hood' : 'w-3 bg-white/35 hover:bg-white/55'
+              )}
+              aria-label={`Go to ${c.name}`}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function StatChip({
+  label,
+  value,
+  highlight,
+}: {
+  label: string
+  value: string
+  highlight?: boolean
+}) {
+  return (
+    <div className="px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur-md border border-white/15">
+      <div className="text-[10px] uppercase tracking-wide text-white/55 font-medium">{label}</div>
+      <div
+        className={clsx(
+          'text-sm font-bold tabular-nums',
+          highlight ? 'text-hood' : 'text-white'
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
