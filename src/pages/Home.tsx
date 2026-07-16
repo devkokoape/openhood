@@ -1,17 +1,22 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, type RefObject } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
   Flame,
+  Trophy,
   Zap,
 } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { FeaturedHero } from '../components/nft/FeaturedHero'
 import { FeaturedCollectionCard } from '../components/nft/FeaturedCollectionCard'
-import { TrendingTable } from '../components/nft/TrendingTable'
-import { ListingCard } from '../components/nft/ListingCard'
+import {
+  TrendingTable,
+  collectionSales,
+  collectionVolume,
+} from '../components/nft/TrendingTable'
+import { NotableCollectionCard } from '../components/nft/NotableCollectionCard'
 import { HomeActivityFeed } from '../components/nft/HomeActivityFeed'
 import { formatPrice } from '../data/mockData'
 import { ONCHAIN_COLLECTION_SLUG, isMarketplaceDeployed } from '../lib/marketplace'
@@ -22,6 +27,7 @@ export function Home() {
   const [params] = useSearchParams()
   const q = (params.get('q') || '').toLowerCase()
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const notableRef = useRef<HTMLDivElement>(null)
 
   const featured = useMemo(() => {
     let list = [...collections].sort((a, b) => b.volume24h - a.volume24h)
@@ -36,24 +42,25 @@ export function Home() {
     return list
   }, [collections, q])
 
-  /** OpenSea-style: floor-ish / mid market asks, not only highest price */
-  const listed = useMemo(() => {
-    const pool = nfts.filter((n) => n.listed && n.price != null && n.price > 0)
-    // Prefer items near collection floor, then fill by price
-    const scored = pool.map((n) => {
-      const col = collections.find((c) => c.id === n.collectionId)
-      const floor = col?.floorPrice || n.price || 1
-      const dist = Math.abs((n.price || 0) - floor) / Math.max(floor, 1e-9)
-      return { n, dist, price: n.price || 0 }
-    })
-    scored.sort((a, b) => a.dist - b.dist || a.price - b.price)
-    return scored.slice(0, 12).map((s) => s.n)
-  }, [nfts, collections])
+  /** Top collections by 7-day sales (fallback: 7d volume) — single row */
+  const notableCollections = useMemo(() => {
+    return [...collections]
+      .map((c) => ({
+        c,
+        sales7d: collectionSales(c, '7d'),
+        volume7d: collectionVolume(c, '7d'),
+      }))
+      .sort((a, b) => {
+        if (b.sales7d !== a.sales7d) return b.sales7d - a.sales7d
+        return b.volume7d - a.volume7d
+      })
+      .slice(0, 10)
+  }, [collections])
 
   const totalVol = collections.reduce((s, c) => s + c.volume24h, 0)
 
-  const scrollBy = (dir: -1 | 1) => {
-    scrollerRef.current?.scrollBy({ left: dir * 320, behavior: 'smooth' })
+  const scrollBy = (dir: -1 | 1, ref: RefObject<HTMLDivElement | null>) => {
+    ref.current?.scrollBy({ left: dir * 280, behavior: 'smooth' })
   }
 
   return (
@@ -126,7 +133,7 @@ export function Home() {
               <div className="hidden sm:flex gap-1">
                 <button
                   type="button"
-                  onClick={() => scrollBy(-1)}
+                  onClick={() => scrollBy(-1, scrollerRef)}
                   className="w-8 h-8 rounded-full border border-edge bg-surface hover:border-hood hover:text-hood flex items-center justify-center cursor-pointer"
                   aria-label="Scroll left"
                 >
@@ -134,7 +141,7 @@ export function Home() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => scrollBy(1)}
+                  onClick={() => scrollBy(1, scrollerRef)}
                   className="w-8 h-8 rounded-full border border-edge bg-surface hover:border-hood hover:text-hood flex items-center justify-center cursor-pointer"
                   aria-label="Scroll right"
                 >
@@ -168,27 +175,34 @@ export function Home() {
         </section>
 
         {/* Trending + Degen */}
-        <section className="grid lg:grid-cols-[1fr_min(340px,32%)] gap-4 sm:gap-5">
+        <section className="grid lg:grid-cols-[1fr_min(320px,30%)] gap-4 sm:gap-5">
           <div className="min-w-0">
             <div className="flex items-center justify-between mb-2.5 gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                <Flame className="w-4 h-4 text-hood shrink-0" />
-                <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
-                  Trending
-                </h2>
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-hood/25 to-hood/5 border border-hood/20 flex items-center justify-center shrink-0">
+                  <Flame className="w-4 h-4 text-hood" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
+                    Trending
+                  </h2>
+                  <p className="text-[11px] text-ink-3 hidden sm:block">
+                    Ranked by volume · switch time range
+                  </p>
+                </div>
               </div>
               <Link
                 to="/collections"
                 className="text-xs sm:text-sm font-bold text-hood hover:underline inline-flex items-center gap-1 shrink-0"
               >
-                All collections
+                All
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
-            <TrendingTable collections={collections} limit={12} />
+            <TrendingTable collections={collections} limit={10} />
           </div>
 
-          <aside className="rounded-2xl border border-edge overflow-hidden relative min-h-[200px] lg:min-h-full flex flex-col justify-end p-5 bg-surface-2">
+          <aside className="rounded-2xl border border-edge overflow-hidden relative min-h-[220px] lg:min-h-full flex flex-col justify-end p-5 bg-surface-2">
             <div className="absolute inset-0">
               {featured[0] && (
                 <img
@@ -219,38 +233,69 @@ export function Home() {
           </aside>
         </section>
 
-        {/* Notable listings — OpenSea / Blur uniform grid */}
+        {/* Notable collections — top 7d sales, single row */}
         <section>
           <div className="flex items-end justify-between mb-3 gap-3">
-            <div className="min-w-0">
-              <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
-                Notable listings
-              </h2>
-              <p className="text-xs sm:text-sm text-ink-3 mt-0.5">
-                Floor-adjacent asks · buy in one click
-              </p>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-hood to-[#00a804] flex items-center justify-center shrink-0 shadow-md shadow-hood/25">
+                <Trophy className="w-4 h-4 text-[#0b0e11]" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
+                  Notable collections
+                </h2>
+                <p className="text-xs sm:text-sm text-ink-3 mt-0.5">
+                  Highest sales in the last 7 days
+                </p>
+              </div>
             </div>
-            <Link
-              to="/degen/bulk"
-              className="text-xs sm:text-sm font-bold text-hood hover:underline shrink-0 inline-flex items-center gap-1"
-            >
-              Sweep
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className="hidden sm:flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => scrollBy(-1, notableRef)}
+                  className="w-8 h-8 rounded-full border border-edge bg-surface hover:border-hood hover:text-hood flex items-center justify-center cursor-pointer"
+                  aria-label="Scroll left"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollBy(1, notableRef)}
+                  className="w-8 h-8 rounded-full border border-edge bg-surface hover:border-hood hover:text-hood flex items-center justify-center cursor-pointer"
+                  aria-label="Scroll right"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              <Link
+                to="/collections"
+                className="text-xs sm:text-sm font-bold text-hood hover:underline inline-flex items-center gap-1"
+              >
+                Rankings
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
 
-          {listed.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-edge py-14 text-center text-sm text-ink-3">
-              No active listings right now.
+          {notableCollections.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-edge py-10 text-center text-sm text-ink-3">
+              No collection stats yet.
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
-              {listed.map((n) => (
-                <ListingCard
-                  key={n.id}
-                  nft={n}
-                  collection={collections.find((c) => c.id === n.collectionId)}
-                />
+            <div
+              ref={notableRef}
+              className="flex gap-2.5 sm:gap-3 overflow-x-auto pb-1 snap-x snap-mandatory scroll-smooth hide-scrollbar -mx-2 px-2 sm:-mx-3 sm:px-3 lg:-mx-4 lg:px-4"
+            >
+              {notableCollections.map(({ c, sales7d, volume7d }, i) => (
+                <div key={c.id} className="snap-start">
+                  <NotableCollectionCard
+                    collection={c}
+                    rank={i + 1}
+                    sales7d={sales7d}
+                    volume7d={volume7d}
+                  />
+                </div>
               ))}
             </div>
           )}

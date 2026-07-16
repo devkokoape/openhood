@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BadgeCheck, TrendingUp } from 'lucide-react'
+import { BadgeCheck, Crown, TrendingUp } from 'lucide-react'
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
 import clsx from 'clsx'
@@ -15,12 +15,10 @@ const RANGES: { id: TrendingRange; label: string }[] = [
   { id: 'all', label: 'All' },
 ]
 
-/** Volume for a collection in a given window (OpenSea intervals when present). */
 export function collectionVolume(c: Collection, range: TrendingRange): number {
   const i = c.intervals
   switch (range) {
     case '24h':
-      return i?.volume1d ?? c.volume24h
     case '1d':
       return i?.volume1d ?? c.volume24h
     case '7d':
@@ -51,7 +49,17 @@ export function collectionSales(c: Collection, range: TrendingRange): number {
   }
 }
 
-/** Compact OpenSea-style ranking table with time-range tabs */
+function rankStyle(rank: number) {
+  if (rank === 1)
+    return 'bg-gradient-to-br from-hood to-[#00a804] text-[#0b0e11] shadow-md shadow-hood/25'
+  if (rank === 2)
+    return 'bg-gradient-to-br from-zinc-300 to-zinc-400 text-zinc-900 dark:from-zinc-500 dark:to-zinc-600 dark:text-white'
+  if (rank === 3)
+    return 'bg-gradient-to-br from-amber-600/90 to-amber-800 text-white'
+  return 'bg-surface-3 text-ink-3'
+}
+
+/** Stylish ranking board with time-range pills */
 export function TrendingTable({
   collections,
   limit = 10,
@@ -73,116 +81,137 @@ export function TrendingTable({
   }, [collections, range, limit])
 
   const maxVol = Math.max(1, ...rows.map((r) => r.vol))
+  const totalVol = rows.reduce((s, r) => s + r.vol, 0)
 
   return (
-    <div className="rounded-2xl border border-edge overflow-hidden bg-surface">
-      {/* Range tabs */}
-      <div className="flex items-center justify-between gap-2 px-2 sm:px-3 py-2 border-b border-edge bg-surface-2/60">
-        <div className="flex gap-0.5 p-0.5 rounded-xl bg-surface border border-edge overflow-x-auto hide-scrollbar">
+    <div className="rounded-2xl border border-edge overflow-hidden bg-surface relative">
+      {/* Soft brand glow */}
+      <div className="pointer-events-none absolute -top-16 -right-16 w-48 h-48 rounded-full bg-hood/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-20 -left-10 w-40 h-40 rounded-full bg-hood/5 blur-3xl" />
+
+      {/* Header */}
+      <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 sm:px-4 py-3 border-b border-edge bg-gradient-to-r from-surface-2/90 via-surface-2/50 to-transparent">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-hood/15 border border-hood/25 flex items-center justify-center shrink-0">
+            <Crown className="w-4 h-4 text-hood" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-extrabold text-ink leading-tight">Leaderboard</div>
+            <div className="text-[11px] text-ink-3 tabular-nums">
+              {range === 'all' ? 'All-time' : range} vol · {formatPrice(totalVol)} ETH
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-0.5 p-1 rounded-xl bg-surface border border-edge shadow-inner overflow-x-auto hide-scrollbar shrink-0">
           {RANGES.map((r) => (
             <button
               key={r.id}
               type="button"
               onClick={() => setRange(r.id)}
               className={clsx(
-                'px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold tabular-nums transition-colors cursor-pointer shrink-0',
+                'px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold tabular-nums transition-all cursor-pointer shrink-0',
                 range === r.id
-                  ? 'bg-hood text-[#0b0e11] shadow-sm'
-                  : 'text-ink-3 hover:text-ink'
+                  ? 'bg-hood text-[#0b0e11] shadow-sm shadow-hood/30 scale-[1.02]'
+                  : 'text-ink-3 hover:text-ink hover:bg-surface-2'
               )}
             >
               {r.label}
             </button>
           ))}
         </div>
-        <span className="text-[10px] text-ink-3 font-medium uppercase tracking-wide hidden sm:inline shrink-0">
-          By volume
-        </span>
       </div>
 
-      <div className="overflow-x-auto table-scroll">
-        <table className="w-full text-sm min-w-[520px]">
-          <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wide text-ink-3 border-b border-edge bg-surface-2/40">
-              <th className="px-3 py-2.5 font-semibold w-10">#</th>
-              <th className="px-3 py-2.5 font-semibold">Collection</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Floor</th>
-              <th className="px-3 py-2.5 font-semibold text-right">
-                {range === 'all' ? 'Total vol' : `${range} vol`}
-              </th>
-              <th className="px-3 py-2.5 font-semibold text-right hidden md:table-cell">
-                Sales
-              </th>
-              <th className="px-3 py-2.5 font-semibold text-right hidden sm:table-cell w-[22%]">
-                Share
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ c, vol, sales }, i) => (
-              <tr
-                key={c.id}
-                className="border-b border-edge last:border-0 hover:bg-surface-2/80 transition-colors group"
+      {/* Rows as stylish cards */}
+      <div className="relative divide-y divide-[var(--color-border)]">
+        {rows.map(({ c, vol, sales }, i) => {
+          const rank = i + 1
+          const share = (vol / maxVol) * 100
+          return (
+            <Link
+              key={c.id}
+              to={`/collection/${c.slug}`}
+              className="group flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-3 hover:bg-hood-muted/30 transition-colors relative overflow-hidden"
+            >
+              {/* Volume share bar background */}
+              <div
+                className="absolute inset-y-0 left-0 bg-hood/[0.04] dark:bg-hood/[0.07] transition-all duration-500 pointer-events-none"
+                style={{ width: `${share}%` }}
+              />
+
+              <div
+                className={clsx(
+                  'relative z-[1] w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[11px] sm:text-xs font-extrabold tabular-nums shrink-0',
+                  rankStyle(rank)
+                )}
               >
-                <td className="px-3 py-3 text-ink-3 tabular-nums font-medium">{i + 1}</td>
-                <td className="px-3 py-3">
-                  <Link
-                    to={`/collection/${c.slug}`}
-                    className="flex items-center gap-2.5 group/link min-w-0"
-                  >
-                    <img
-                      src={c.image}
-                      alt=""
-                      className="w-9 h-9 rounded-lg object-cover shrink-0 ring-1 ring-edge"
-                    />
-                    <span className="font-semibold text-ink group-hover/link:text-hood truncate flex items-center gap-1">
-                      {c.name}
-                      {c.verified && (
-                        <BadgeCheck className="w-3.5 h-3.5 text-hood shrink-0" />
-                      )}
-                    </span>
-                  </Link>
-                </td>
-                <td className="px-3 py-3 text-right tabular-nums font-semibold text-ink">
-                  {formatPrice(c.floorPrice)}{' '}
-                  <span className="text-hood text-[10px]">ETH</span>
-                </td>
-                <td className="px-3 py-3 text-right tabular-nums font-semibold text-ink">
-                  <span className="inline-flex items-center gap-1 justify-end">
-                    {i < 3 && vol > 0 && (
-                      <TrendingUp className="w-3 h-3 text-hood shrink-0" />
-                    )}
-                    {formatPrice(vol)}{' '}
-                    <span className="text-ink-3 text-[10px]">ETH</span>
+                {rank}
+              </div>
+
+              <img
+                src={c.image}
+                alt=""
+                className="relative z-[1] w-10 h-10 sm:w-11 sm:h-11 rounded-xl object-cover shrink-0 ring-1 ring-edge group-hover:ring-hood/40 transition-all"
+              />
+
+              <div className="relative z-[1] flex-1 min-w-0">
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="font-bold text-sm text-ink truncate group-hover:text-hood transition-colors">
+                    {c.name}
                   </span>
-                </td>
-                <td className="px-3 py-3 text-right tabular-nums text-ink-2 hidden md:table-cell">
-                  {sales > 0 ? sales.toLocaleString() : '—'}
-                </td>
-                <td className="px-3 py-3 hidden sm:table-cell">
-                  <div className="flex items-center gap-2 justify-end">
-                    <div className="flex-1 max-w-[100px] h-1.5 rounded-full bg-surface-3 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-hood/80 transition-all duration-500"
-                        style={{ width: `${Math.min(100, (vol / maxVol) * 100)}%` }}
-                      />
-                    </div>
-                    <span className="text-[10px] text-ink-3 tabular-nums w-8 text-right">
-                      {((vol / maxVol) * 100).toFixed(0)}%
+                  {c.verified && (
+                    <BadgeCheck className="w-3.5 h-3.5 text-hood shrink-0" />
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 text-[11px] text-ink-3">
+                  <span className="tabular-nums">
+                    Floor{' '}
+                    <span className="font-semibold text-ink">
+                      {formatPrice(c.floorPrice)}
                     </span>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-ink-3 text-sm">
-                  No collections yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                  </span>
+                  <span className="text-edge">·</span>
+                  <span className="tabular-nums hidden sm:inline">
+                    {c.owners.toLocaleString()} owners
+                  </span>
+                  {sales > 0 && (
+                    <>
+                      <span className="text-edge sm:hidden">·</span>
+                      <span className="tabular-nums sm:hidden">
+                        {sales.toLocaleString()} sales
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="relative z-[1] text-right shrink-0 pl-1">
+                <div className="inline-flex items-center gap-1 justify-end">
+                  {rank <= 3 && vol > 0 && (
+                    <TrendingUp className="w-3 h-3 text-hood shrink-0" />
+                  )}
+                  <span className="text-sm font-extrabold tabular-nums text-ink">
+                    {formatPrice(vol)}
+                  </span>
+                  <span className="text-[10px] font-bold text-hood">ETH</span>
+                </div>
+                <div className="text-[10px] text-ink-3 tabular-nums mt-0.5">
+                  {range === 'all' ? 'total' : `${range}`} vol
+                  {sales > 0 && (
+                    <span className="hidden sm:inline">
+                      {' '}
+                      · {sales.toLocaleString()} sales
+                    </span>
+                  )}
+                </div>
+              </div>
+            </Link>
+          )
+        })}
+
+        {rows.length === 0 && (
+          <p className="px-4 py-12 text-center text-sm text-ink-3">No collections yet.</p>
+        )}
       </div>
     </div>
   )
