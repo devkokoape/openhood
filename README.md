@@ -38,6 +38,25 @@ Chain browse: https://opensea.io/collections/chain/robinhood
 - **wagmi + viem** wallet connect (Robinhood Chain `4663`)
 - OpenSea stats snapshot + mock marketplace actions
 
+## Marketplace smart contracts
+
+**Yes — fee-taking marketplace is implemented** under `contracts/`:
+
+- **List / buy / cancel** fixed-price sales (NFT escrowed)
+- **English auctions** (bid, outbid refund, settle)
+- **Protocol fee** on every trade (default **2.5%**, max 10%)
+
+```bash
+npm run contracts:test              # 6 unit tests
+npm run contracts:deploy:local      # hardhat
+# Fund deployer → Robinhood testnet:
+# https://faucet.testnet.chain.robinhood.com/
+npm run contracts:deploy:testnet
+npm run contracts:smoke:testnet
+```
+
+See [`contracts/README.md`](./contracts/README.md).
+
 ## Wallet connect
 
 Navbar **Connect** opens a modal:

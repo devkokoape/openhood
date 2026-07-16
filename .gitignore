@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+cache
+artifacts
+typechain-types
+coverage
+coverage.json
 
 # Env / secrets
 .env
