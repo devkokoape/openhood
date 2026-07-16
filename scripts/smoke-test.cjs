@@ -47,23 +47,25 @@ async function main() {
     tokenId = (await nft.nextTokenId()) - 1n;
   }
 
-  const price = hre.ethers.parseEther("0.01");
+  // Keep values tiny so faucet-sized balances work on testnet
+  const price = hre.ethers.parseEther("0.001");
   console.log("\nApproving marketplace for token", tokenId.toString());
   await (await nft.approve(await market.getAddress(), tokenId)).wait();
 
-  console.log("Listing at 0.01 ETH...");
+  console.log("Listing at 0.001 ETH...");
   const listTx = await market.list(await nft.getAddress(), tokenId, price);
-  const listRc = await listTx.wait();
-  const listingId = await market.nextListingId() - 1n;
+  await listTx.wait();
+  const listingId = (await market.nextListingId()) - 1n;
   console.log("Listing ID:", listingId.toString());
 
   // Use a random wallet as buyer funded by deployer
   const buyer = hre.ethers.Wallet.createRandom().connect(hre.ethers.provider);
-  console.log("Funding buyer", buyer.address);
+  const fundAmount = hre.ethers.parseEther("0.003");
+  console.log("Funding buyer", buyer.address, "with", hre.ethers.formatEther(fundAmount), "ETH");
   await (
     await deployer.sendTransaction({
       to: buyer.address,
-      value: hre.ethers.parseEther("0.05"),
+      value: fundAmount,
     })
   ).wait();
 

@@ -1,0 +1,16 @@
+{
+  "network": "robinhoodTestnet",
+  "chainId": 46630,
+  "deployedAt": "2026-07-16T09:04:48.507Z",
+  "deployer": "0xFd64a84cEfc471Ec7dE84a164D57eF311CCe5Fc6",
+  "feeBps": 250,
+  "feeRecipient": "0xFd64a84cEfc471Ec7dE84a164D57eF311CCe5Fc6",
+  "contracts": {
+    "OpenHoodMarketplace": "0xEc164cCA500E761eaE1e886ee7D347212409f619",
+    "MockERC721": "0x88e3Dd568bF102499B332124B4D78472861641ed"
+  },
+  "explorer": {
+    "marketplace": "https://explorer.testnet.chain.robinhood.com/address/0xEc164cCA500E761eaE1e886ee7D347212409f619",
+    "nft": "https://explorer.testnet.chain.robinhood.com/address/0x88e3Dd568bF102499B332124B4D78472861641ed"
+  }
+}
