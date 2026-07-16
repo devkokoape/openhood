@@ -36,6 +36,9 @@ import {
   type TraitFilterMap,
 } from '../lib/traits'
 import type { ActivityType } from '../types'
+import { ONCHAIN_COLLECTION_ID, parseOnChainTokenId } from '../lib/marketplace'
+import { useMarketplaceTx } from '../hooks/useOnChainMarket'
+import { TxToast } from '../components/wallet/TxToast'
 
 type SortKey = 'price_asc' | 'price_desc' | 'id' | 'rarity_asc' | 'rarity_desc'
 type GridSize = 'sm' | 'md' | 'lg'
@@ -91,6 +94,9 @@ export function CollectionPage() {
     connect,
     isFounderOf,
     actor,
+    chainEnabled,
+    listingByToken,
+    refreshChain,
   } = useMarketplace()
   const [tab, setTab] = useState('items')
   const [offerOpen, setOfferOpen] = useState(false)
@@ -109,10 +115,14 @@ export function CollectionPage() {
   })
   const [sweepMode, setSweepMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [toast, setToast] = useState('')
+  const [toast, setToast] = useState<{ msg: string; hash?: string; pending?: boolean } | null>(
+    null
+  )
   const [activityFilter, setActivityFilter] = useState('all')
+  const { buyOnChain, mintDemo, isPending, isConfirming } = useMarketplaceTx()
 
   const collection = collections.find((c) => c.slug === slug || c.id === slug)
+  const isOnChainCol = collection?.id === ONCHAIN_COLLECTION_ID && chainEnabled
 
   useEffect(() => {
     localStorage.setItem('openhood-grid', grid)
@@ -232,16 +242,60 @@ export function CollectionPage() {
   const selectAllListed = () => setSelected(new Set(sweepable.map((x) => x.id)))
   const clearSelection = () => setSelected(new Set())
 
-  const doSweep = () => {
+  const doSweep = async () => {
     if (!connected) {
       connect()
       return
     }
     if (selected.size === 0) return
+
+    if (isOnChainCol) {
+      setToast({ msg: `Buying ${selected.size} on-chain…`, pending: true })
+      let ok = 0
+      let lastHash: string | undefined
+      for (const n of selectedNfts) {
+        const tid = parseOnChainTokenId(n.id)
+        if (tid == null) continue
+        const L = listingByToken.get(String(tid))
+        if (!L) continue
+        try {
+          lastHash = await buyOnChain(L.listingId, L.price)
+          ok++
+        } catch {
+          break
+        }
+      }
+      await refreshChain()
+      setSelected(new Set())
+      setToast({ msg: `Bought ${ok} on-chain`, hash: lastHash })
+      setTimeout(() => setToast(null), 5000)
+      return
+    }
+
     const count = bulkBuy([...selected])
-    setToast(`Swept ${count} NFT${count === 1 ? '' : 's'} for ${formatPrice(sweepTotal)} ETH`)
+    setToast({
+      msg: `Swept ${count} NFT${count === 1 ? '' : 's'} for ${formatPrice(sweepTotal)} ETH (demo)`,
+    })
     setSelected(new Set())
-    setTimeout(() => setToast(''), 3000)
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  const handleMintDemo = async () => {
+    if (!connected) {
+      connect()
+      return
+    }
+    setToast({ msg: 'Minting… confirm in wallet', pending: true })
+    try {
+      const h = await mintDemo()
+      setTimeout(() => void refreshChain(), 3000)
+      setToast({ msg: 'Mint submitted', hash: h })
+      setTimeout(() => setToast(null), 5000)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Mint failed'
+      setToast({ msg: msg.slice(0, 100) })
+      setTimeout(() => setToast(null), 4000)
+    }
   }
 
   const toggleSweep = () => {
@@ -268,9 +322,12 @@ export function CollectionPage() {
   return (
     <div className={clsx('animate-fade-in', sweepMode && selected.size > 0 && 'pb-28')}>
       {toast && (
-        <div className="fixed top-20 right-4 z-50 px-4 py-2 rounded-xl bg-hood text-[#0b0e11] font-semibold text-sm shadow-lg">
-          {toast}
-        </div>
+        <TxToast
+          message={toast.msg}
+          hash={toast.hash}
+          pending={toast.pending || isPending || isConfirming}
+          onClose={() => setToast(null)}
+        />
       )}
 
       {/* —— Banner (resizable) —— */}
@@ -431,8 +488,8 @@ export function CollectionPage() {
                   title="Share"
                   onClick={() => {
                     void navigator.clipboard?.writeText(window.location.href)
-                    setToast('Link copied')
-                    setTimeout(() => setToast(''), 1500)
+                    setToast({ msg: 'Link copied' })
+                    setTimeout(() => setToast(null), 1500)
                   }}
                 >
                   <Share2 className="w-4 h-4" />
@@ -446,6 +503,11 @@ export function CollectionPage() {
                     <Pencil className="w-4 h-4" />
                   </Link>
                 )}
+                {isOnChainCol && (
+                  <Button size="sm" variant="secondary" onClick={() => void handleMintDemo()}>
+                    Mint demo NFT
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant={sweepMode ? 'primary' : 'outline'}
@@ -457,9 +519,11 @@ export function CollectionPage() {
                   <ShoppingCart className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">{sweepMode ? 'Exit' : 'Sweep'}</span>
                 </Button>
-                <Button size="sm" onClick={() => setOfferOpen(true)}>
-                  Make offer
-                </Button>
+                {!isOnChainCol && (
+                  <Button size="sm" onClick={() => setOfferOpen(true)}>
+                    Make offer
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -941,9 +1005,13 @@ export function CollectionPage() {
                   {formatPrice(sweepTotal)} <span className="text-hood text-sm">ETH</span>
                 </div>
               </div>
-              <Button size="lg" onClick={doSweep}>
+              <Button
+                size="lg"
+                onClick={() => void doSweep()}
+                disabled={isPending || isConfirming}
+              >
                 <ShoppingCart className="w-4 h-4" />
-                Buy now
+                {isOnChainCol ? 'Buy on-chain' : 'Buy now'}
               </Button>
             </div>
           </div>

@@ -23,16 +23,21 @@ import {
 } from '../data/mockData'
 import { actorId, formatAddress, sameAddress } from '../lib/address'
 import { openConnectWallet } from '../lib/walletUi'
+import {
+  ONCHAIN_COLLECTION_ID,
+  isMarketplaceDeployed,
+} from '../lib/marketplace'
+import {
+  useOnChainCollectionMeta,
+  useOnChainInventory,
+} from '../hooks/useOnChainMarket'
+import type { ChainAuction, ChainListing } from '../lib/marketplace'
 
 interface MarketplaceCtx {
-  /** Short display address, or empty when disconnected */
   user: string
-  /** Full wallet address when connected */
   address: string | undefined
-  /** Canonical id used for ownership / offers (lowercase full address) */
   actor: string
   connected: boolean
-  /** Opens the Connect Wallet modal */
   connect: () => void
   disconnect: () => void
   collections: Collection[]
@@ -41,6 +46,8 @@ interface MarketplaceCtx {
   activities: Activity[]
   mintDrops: MintDrop[]
   refresh: () => void
+  /** Refetch on-chain listings / ownership */
+  refreshChain: () => Promise<void>
   buy: (nftId: string) => boolean
   bulkBuy: (nftIds: string[]) => number
   list: (nftId: string, price: number) => boolean
@@ -52,6 +59,12 @@ interface MarketplaceCtx {
   ) => boolean
   isOwnerOf: (ownerField: string) => boolean
   isFounderOf: (founderField: string) => boolean
+  /** On-chain marketplace live */
+  chainEnabled: boolean
+  listingByToken: Map<string, ChainListing>
+  auctionByToken: Map<string, ChainAuction>
+  chainListings: ChainListing[]
+  chainAuctions: ChainAuction[]
 }
 
 const MarketplaceContext = createContext<MarketplaceCtx | null>(null)
@@ -61,41 +74,64 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const { disconnect: wagmiDisconnect } = useDisconnect()
   const [tick, setTick] = useState(0)
 
+  const onChainMeta = useOnChainCollectionMeta()
+  const {
+    enabled: chainEnabled,
+    nfts: chainNfts,
+    listings: chainListings,
+    auctions: chainAuctions,
+    listingByToken,
+    auctionByToken,
+    collectionPatch,
+    refetchAll,
+  } = useOnChainInventory()
+
   const refresh = useCallback(() => setTick((t) => t + 1), [])
+  const refreshChain = useCallback(async () => {
+    await refetchAll()
+    refresh()
+  }, [refetchAll, refresh])
 
   const connected = Boolean(isConnected && address)
   const actor = connected && address ? actorId(address) : ''
-  const user = actor ? formatAddress(address!) : ''
+  const user = actor && address ? formatAddress(address) : ''
 
-  // tick forces re-read of mutated module-level mock stores after actions
   const collections = useMemo(() => {
     void tick
-    return [...seedCollections]
-  }, [tick])
+    const mock = [...seedCollections]
+    if (!chainEnabled || !isMarketplaceDeployed()) return mock
+    const live: Collection = {
+      ...onChainMeta,
+      ...collectionPatch,
+    }
+    // Put live testnet collection first
+    return [live, ...mock.filter((c) => c.id !== ONCHAIN_COLLECTION_ID)]
+  }, [tick, chainEnabled, onChainMeta, collectionPatch])
+
   const nfts = useMemo(() => {
     void tick
-    return [...seedNfts]
-  }, [tick])
+    const mock = seedNfts.filter((n) => n.collectionId !== ONCHAIN_COLLECTION_ID)
+    if (!chainEnabled) return [...mock]
+    return [...chainNfts, ...mock]
+  }, [tick, chainEnabled, chainNfts])
+
   const offers = useMemo(() => {
     void tick
     return [...seedOffers]
   }, [tick])
+
   const activities = useMemo(() => {
     void tick
     return [...seedActivities]
   }, [tick])
+
   const mintDrops = useMemo(() => {
     void tick
     return [...seedMints]
   }, [tick])
 
-  const connect = useCallback(() => {
-    openConnectWallet()
-  }, [])
-
-  const disconnect = useCallback(() => {
-    wagmiDisconnect()
-  }, [wagmiDisconnect])
+  const connect = useCallback(() => openConnectWallet(), [])
+  const disconnect = useCallback(() => wagmiDisconnect(), [wagmiDisconnect])
 
   const isOwnerOf = useCallback(
     (ownerField: string) => sameAddress(ownerField, actor) || sameAddress(ownerField, address),
@@ -103,11 +139,14 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   )
 
   const isFounderOf = useCallback(
-    (founderField: string) => sameAddress(founderField, actor) || sameAddress(founderField, address),
+    (founderField: string) =>
+      sameAddress(founderField, actor) || sameAddress(founderField, address),
     [actor, address]
   )
 
+  // Mock-path actions (OpenSea catalog demo only — not on-chain)
   const buy = (nftId: string) => {
+    if (nftId.startsWith(ONCHAIN_COLLECTION_ID)) return false
     if (!actor) {
       openConnectWallet()
       return false
@@ -118,16 +157,18 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   }
 
   const bulkBuy = (nftIds: string[]) => {
+    const mockIds = nftIds.filter((id) => !id.startsWith(ONCHAIN_COLLECTION_ID))
     if (!actor) {
       openConnectWallet()
       return 0
     }
-    const n = doBulkBuy(nftIds, actor)
+    const n = doBulkBuy(mockIds, actor)
     if (n > 0) refresh()
     return n
   }
 
   const list = (nftId: string, price: number) => {
+    if (nftId.startsWith(ONCHAIN_COLLECTION_ID)) return false
     if (!actor) {
       openConnectWallet()
       return false
@@ -154,10 +195,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       openConnectWallet()
       throw new Error('Connect wallet to make an offer')
     }
-    const o = doAddOffer({
-      ...offer,
-      offerer: actor,
-    })
+    const o = doAddOffer({ ...offer, offerer: actor })
     refresh()
     return o
   }
@@ -195,6 +233,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         activities,
         mintDrops,
         refresh,
+        refreshChain,
         buy,
         bulkBuy,
         list,
@@ -203,6 +242,11 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         updateCollection,
         isOwnerOf,
         isFounderOf,
+        chainEnabled: chainEnabled && isMarketplaceDeployed(),
+        listingByToken,
+        auctionByToken,
+        chainListings,
+        chainAuctions,
       }}
     >
       {children}

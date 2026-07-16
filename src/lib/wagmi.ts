@@ -1,22 +1,20 @@
 import { http, createConfig, createStorage, injected } from 'wagmi'
 import { robinhood, robinhoodTestnet } from './chains'
+import { MARKETPLACE_CHAIN_ID } from './marketplace'
 
-/**
- * Injected wallets only (MetaMask, Rabby, Coinbase extension, Phantom, etc.)
- * via EIP-6963 multiInjectedProviderDiscovery.
- *
- * WalletConnect / MetaMask SDK need extra peer packages + project IDs —
- * enable later with VITE_WALLETCONNECT_PROJECT_ID if needed.
- */
+/** Prefer testnet when marketplace is deployed there (default 46630). */
+const primary =
+  MARKETPLACE_CHAIN_ID === robinhood.id ? robinhood : robinhoodTestnet
+const secondary = primary.id === robinhood.id ? robinhoodTestnet : robinhood
+
 export const wagmiConfig = createConfig({
-  chains: [robinhood, robinhoodTestnet],
+  chains: [primary, secondary],
   connectors: [
     injected({
       shimDisconnect: true,
       unstable_shimAsyncInject: 2_000,
     }),
   ],
-  // Discover all EIP-6963 browser wallets as separate connectors
   multiInjectedProviderDiscovery: true,
   transports: {
     [robinhood.id]: http('https://rpc.mainnet.chain.robinhood.com', {

@@ -8,6 +8,7 @@ import { TrendingTable } from '../components/nft/TrendingTable'
 import { NftCard } from '../components/nft/NftCard'
 import { ActivityRow } from '../components/nft/ActivityRow'
 import { formatPrice } from '../data/mockData'
+import { ONCHAIN_COLLECTION_SLUG, isMarketplaceDeployed } from '../lib/marketplace'
 
 export function Home() {
   const { collections, nfts, activities } = useMarketplace()
@@ -40,6 +41,22 @@ export function Home() {
     <div className="animate-fade-in">
       {/* Full-bleed-ish hero area */}
       <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 pt-4 pb-2">
+        {isMarketplaceDeployed() && (
+          <div className="mb-3 rounded-xl border border-hood/40 bg-hood-muted px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-bold text-ink">Live on Robinhood testnet</div>
+              <p className="text-xs text-ink-2 mt-0.5">
+                Mint, list, buy & auction with a 2.5% fee via OpenHoodMarketplace.
+              </p>
+            </div>
+            <Link
+              to={`/collection/${ONCHAIN_COLLECTION_SLUG}`}
+              className="inline-flex items-center justify-center h-9 px-4 rounded-xl bg-hood text-[#0b0e11] text-sm font-semibold shrink-0"
+            >
+              Open testnet collection →
+            </Link>
+          </div>
+        )}
         <FeaturedHero collections={featured} />
       </div>
 

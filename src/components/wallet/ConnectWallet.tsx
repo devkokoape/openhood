@@ -18,9 +18,13 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { Button } from '../ui/Button'
-import { robinhood } from '../../lib/chains'
+import { robinhood, robinhoodTestnet } from '../../lib/chains'
 import { formatAddress } from '../../lib/address'
 import { onOpenConnectWallet } from '../../lib/walletUi'
+import { MARKETPLACE_CHAIN_ID, MARKETPLACE_EXPLORER } from '../../lib/marketplace'
+
+const targetChain =
+  MARKETPLACE_CHAIN_ID === robinhood.id ? robinhood : robinhoodTestnet
 
 function labelFor(c: Connector): string {
   const n = (c.name || c.id || 'Wallet').trim()
@@ -71,7 +75,7 @@ export function ConnectWallet({
   const [localError, setLocalError] = useState<string | null>(null)
   const [pendingId, setPendingId] = useState<string | null>(null)
 
-  const wrongNetwork = isConnected && chainId !== robinhood.id
+  const wrongNetwork = isConnected && chainId !== targetChain.id
   const busy = isConnecting || isReconnecting || isPending
   const list = useMemo(() => readyConnectors(connectors), [connectors])
 
@@ -106,7 +110,7 @@ export function ConnectWallet({
     setLocalError(null)
     setPendingId(connector.uid)
     try {
-      await connectAsync({ connector, chainId: robinhood.id })
+      await connectAsync({ connector, chainId: targetChain.id })
       setOpen(false)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to connect'
@@ -125,26 +129,29 @@ export function ConnectWallet({
   const onSwitch = async () => {
     setLocalError(null)
     try {
-      await switchChainAsync({ chainId: robinhood.id })
+      await switchChainAsync({ chainId: targetChain.id })
     } catch (e) {
-      // Wallet may not know Robinhood Chain — try wallet_addEthereumChain via provider
+      // Wallet may not know the chain — try wallet_addEthereumChain
       try {
-        const eth = (window as unknown as { ethereum?: { request: (a: unknown) => Promise<unknown> } })
-          .ethereum
+        const eth = (
+          window as unknown as {
+            ethereum?: { request: (a: unknown) => Promise<unknown> }
+          }
+        ).ethereum
         if (!eth) throw e
         await eth.request({
           method: 'wallet_addEthereumChain',
           params: [
             {
-              chainId: `0x${robinhood.id.toString(16)}`,
-              chainName: robinhood.name,
-              nativeCurrency: robinhood.nativeCurrency,
-              rpcUrls: [robinhood.rpcUrls.default.http[0]],
-              blockExplorerUrls: [robinhood.blockExplorers.default.url],
+              chainId: `0x${targetChain.id.toString(16)}`,
+              chainName: targetChain.name,
+              nativeCurrency: targetChain.nativeCurrency,
+              rpcUrls: [targetChain.rpcUrls.default.http[0]],
+              blockExplorerUrls: [targetChain.blockExplorers.default.url],
             },
           ],
         })
-        await switchChainAsync({ chainId: robinhood.id })
+        await switchChainAsync({ chainId: targetChain.id })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Could not switch network'
         setLocalError(msg.slice(0, 160))
@@ -201,8 +208,8 @@ export function ConnectWallet({
                     wrongNetwork ? 'text-[var(--color-danger)]' : 'text-hood'
                   )}
                 >
-                  {chainId === robinhood.id
-                    ? 'Robinhood Chain'
+                  {chainId === targetChain.id
+                    ? targetChain.name
                     : `Wrong network (${chainId})`}
                 </div>
               </div>
@@ -217,12 +224,12 @@ export function ConnectWallet({
                   }}
                 >
                   <Wallet className="w-3.5 h-3.5" />
-                  Switch to Robinhood Chain
+                  Switch to {targetChain.name}
                 </button>
               )}
 
               <a
-                href={`${robinhood.blockExplorers.default.url}/address/${address}`}
+                href={`${MARKETPLACE_EXPLORER}/address/${address}`}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-2 px-3 py-2.5 text-sm text-ink-2 hover:bg-surface-2 hover:text-ink"
@@ -297,7 +304,7 @@ export function ConnectWallet({
                     Connect wallet
                   </h2>
                   <p className="text-xs text-ink-3 mt-0.5">
-                    Robinhood Chain · chain ID {robinhood.id}
+                    {targetChain.name} · chain ID {targetChain.id}
                   </p>
                 </div>
                 <button
@@ -394,9 +401,9 @@ export function ConnectWallet({
 
               <div className="px-5 py-3 border-t border-edge bg-surface-2/60 shrink-0">
                 <p className="text-[11px] text-ink-3 leading-relaxed">
-                  OpenHood uses{' '}
-                  <span className="text-ink font-semibold">Robinhood Chain</span> (ID{' '}
-                  {robinhood.id}). Your wallet will prompt to add/switch if needed.
+                  OpenHood marketplace runs on{' '}
+                  <span className="text-ink font-semibold">{targetChain.name}</span> (ID{' '}
+                  {targetChain.id}). Your wallet will prompt to add/switch if needed.
                 </p>
               </div>
             </div>

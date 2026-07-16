@@ -1,22 +1,48 @@
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ShoppingCart, Trash2 } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { NftCard } from '../components/nft/NftCard'
 import { Button } from '../components/ui/Button'
+import { TxToast } from '../components/wallet/TxToast'
 import { formatPrice } from '../data/mockData'
+import {
+  ONCHAIN_COLLECTION_ID,
+  feeBpsToPercent,
+  parseOnChainTokenId,
+} from '../lib/marketplace'
+import { useMarketFee, useMarketplaceTx } from '../hooks/useOnChainMarket'
 
 export function BulkBuyPage() {
-  const { collections, nfts, bulkBuy, connected, connect, user, actor, isOwnerOf } =
-    useMarketplace()
+  const {
+    collections,
+    nfts,
+    bulkBuy,
+    connected,
+    connect,
+    user,
+    actor,
+    isOwnerOf,
+    listingByToken,
+    chainEnabled,
+    refreshChain,
+  } = useMarketplace()
+  const { buyOnChain, isPending, isConfirming } = useMarketplaceTx()
+  const { feeBps } = useMarketFee()
   const [params] = useSearchParams()
   const initialSlug = params.get('collection') || ''
   const [collectionId, setCollectionId] = useState(() => {
     const c = collections.find((x) => x.slug === initialSlug || x.id === initialSlug)
-    return c?.id || collections[0]?.id || ''
+    // Prefer on-chain collection when available
+    const onchain = collections.find((x) => x.id === ONCHAIN_COLLECTION_ID)
+    return c?.id || onchain?.id || collections[0]?.id || ''
   })
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [toast, setToast] = useState('')
+  const [toast, setToast] = useState<{ msg: string; hash?: string; pending?: boolean } | null>(
+    null
+  )
+
+  const isOnChainCol = collectionId === ONCHAIN_COLLECTION_ID && chainEnabled
 
   const listed = useMemo(() => {
     return nfts
@@ -34,6 +60,7 @@ export function BulkBuyPage() {
 
   const selectedNfts = listed.filter((n) => selected.has(n.id))
   const total = selectedNfts.reduce((s, n) => s + (n.price ?? 0), 0)
+  const fee = (total * feeBps) / 10_000
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -50,33 +77,73 @@ export function BulkBuyPage() {
 
   const clear = () => setSelected(new Set())
 
-  const purchase = () => {
+  const purchase = async () => {
     if (!connected) {
       connect()
       return
     }
     if (selected.size === 0) return
+
+    if (isOnChainCol) {
+      setToast({ msg: `Buying ${selected.size} on-chain…`, pending: true })
+      let ok = 0
+      let lastHash: string | undefined
+      for (const n of selectedNfts) {
+        const tid = parseOnChainTokenId(n.id)
+        if (tid == null) continue
+        const L = listingByToken.get(String(tid))
+        if (!L) continue
+        try {
+          lastHash = await buyOnChain(L.listingId, L.price)
+          ok++
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Buy failed'
+          if (/reject|denied|cancel/i.test(msg)) {
+            setToast({ msg: 'Rejected in wallet' })
+            return
+          }
+        }
+      }
+      await refreshChain()
+      setSelected(new Set())
+      setToast({
+        msg: `Bought ${ok} NFT(s) on-chain`,
+        hash: lastHash,
+        pending: false,
+      })
+      setTimeout(() => setToast(null), 5000)
+      return
+    }
+
     const count = bulkBuy([...selected])
-    setToast(`Bought ${count} NFT${count === 1 ? '' : 's'} for ${formatPrice(total)} ETH`)
+    setToast({
+      msg: `Bought ${count} NFT${count === 1 ? '' : 's'} for ${formatPrice(total)} ETH (demo)`,
+    })
     setSelected(new Set())
-    setTimeout(() => setToast(''), 3000)
+    setTimeout(() => setToast(null), 3000)
   }
 
   const col = collections.find((c) => c.id === collectionId)
+  const busy = isPending || isConfirming
 
   return (
     <div className="mx-auto max-w-[1600px] px-3 sm:px-4 lg:px-5 py-6 animate-fade-in">
       {toast && (
-        <div className="fixed top-20 right-4 z-50 px-4 py-2 rounded-xl bg-hood text-[#0b0e11] font-semibold text-sm shadow-lg">
-          {toast}
-        </div>
+        <TxToast
+          message={toast.msg}
+          hash={toast.hash}
+          pending={toast.pending || busy}
+          onClose={() => setToast(null)}
+        />
       )}
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
         <div>
           <h2 className="text-xl md:text-2xl font-bold text-ink">Bulk buy</h2>
           <p className="text-ink-2 text-sm mt-1">
-            Sweep floors — multi-select listings and ape in one cart.
+            {isOnChainCol
+              ? 'On-chain sweep — each buy is a real tx with protocol fee.'
+              : 'Demo catalog sweep (mock). Switch to OpenHood Testnet for live trades.'}
           </p>
         </div>
         <select
@@ -89,11 +156,21 @@ export function BulkBuyPage() {
         >
           {collections.map((c) => (
             <option key={c.id} value={c.id}>
+              {c.id === ONCHAIN_COLLECTION_ID ? '⚡ ' : ''}
               {c.name} · floor {formatPrice(c.floorPrice)}
             </option>
           ))}
         </select>
       </div>
+
+      {isOnChainCol && (
+        <div className="mb-4 rounded-xl border border-hood/30 bg-hood-muted px-3 py-2 text-xs text-ink-2">
+          Live contract · fee {feeBpsToPercent(feeBps)} ·{' '}
+          <Link to="/collection/openhood-testnet" className="text-hood font-semibold hover:underline">
+            View collection
+          </Link>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 mb-4">
         <Button size="sm" variant="secondary" onClick={() => selectFloor(3)}>
@@ -117,7 +194,15 @@ export function BulkBuyPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {listed.length === 0 && (
             <p className="col-span-full text-ink-3 text-sm py-10 text-center">
-              No listed items available in this collection.
+              No listed items available.
+              {isOnChainCol && (
+                <>
+                  {' '}
+                  <Link to="/collection/openhood-testnet" className="text-hood hover:underline">
+                    Mint or list on OpenHood Testnet
+                  </Link>
+                </>
+              )}
             </p>
           )}
           {listed.map((n) => (
@@ -161,14 +246,22 @@ export function BulkBuyPage() {
                 {formatPrice(total)} <span className="text-hood">ETH</span>
               </span>
             </div>
+            {isOnChainCol && selected.size > 0 && (
+              <div className="flex justify-between text-xs text-ink-3 mt-1">
+                <span>Est. protocol fee</span>
+                <span>{formatPrice(fee)} ETH</span>
+              </div>
+            )}
             <Button
               fullWidth
               size="lg"
               className="mt-4"
-              disabled={selected.size === 0}
-              onClick={purchase}
+              disabled={selected.size === 0 || busy}
+              onClick={() => void purchase()}
             >
-              Buy {selected.size || ''} item{selected.size === 1 ? '' : 's'}
+              {busy
+                ? 'Confirming…'
+                : `Buy ${selected.size || ''} item${selected.size === 1 ? '' : 's'}`}
             </Button>
           </div>
         </aside>
