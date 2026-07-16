@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   useAccount,
   useConnect,
@@ -18,7 +19,8 @@ import {
 import clsx from 'clsx'
 import { Button } from '../ui/Button'
 import { robinhood } from '../../lib/chains'
-import { formatAddress } from '../../data/mockData'
+import { formatAddress } from '../../lib/address'
+import { onOpenConnectWallet } from '../../lib/walletUi'
 
 function labelFor(c: Connector): string {
   const n = (c.name || c.id || 'Wallet').trim()
@@ -72,6 +74,9 @@ export function ConnectWallet({
   const wrongNetwork = isConnected && chainId !== robinhood.id
   const busy = isConnecting || isReconnecting || isPending
   const list = useMemo(() => readyConnectors(connectors), [connectors])
+
+  // Allow any page to open this modal via openConnectWallet()
+  useEffect(() => onOpenConnectWallet(() => setOpen(true)), [])
 
   useEffect(() => {
     if (!open) {
@@ -269,120 +274,135 @@ export function ConnectWallet({
         Connect
       </Button>
 
-      {open && (
-        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      {open &&
+        createPortal(
           <div
-            className="absolute inset-0 bg-black/65 backdrop-blur-sm"
-            onClick={() => setOpen(false)}
-          />
-          <div className="relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-edge bg-surface shadow-2xl animate-fade-in overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-edge shrink-0">
-              <div>
-                <h2 className="text-lg font-bold text-ink">Connect wallet</h2>
-                <p className="text-xs text-ink-3 mt-0.5">
-                  Robinhood Chain · chain ID {robinhood.id}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-2 hover:bg-surface-2 cursor-pointer"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="connect-wallet-title"
+          >
+            {/* Full-page blur overlay */}
+            <div
+              className="absolute inset-0 bg-black/55 backdrop-blur-md supports-[backdrop-filter]:bg-black/40"
+              onClick={() => setOpen(false)}
+              aria-hidden
+            />
 
-            <div className="p-3 space-y-2 overflow-y-auto flex-1">
-              {list.length === 0 && (
-                <div className="px-3 py-8 text-center">
-                  <Wallet className="w-8 h-8 text-ink-3 mx-auto mb-3" />
-                  <p className="text-sm font-semibold text-ink">No wallet detected</p>
-                  <p className="text-xs text-ink-3 mt-1.5 max-w-xs mx-auto">
-                    Install MetaMask or another browser extension, then refresh this page.
+            {/* Centered modal */}
+            <div className="relative z-10 w-full max-w-md rounded-2xl border border-edge bg-surface shadow-2xl animate-fade-in overflow-hidden max-h-[min(90vh,560px)] flex flex-col mx-auto">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-edge shrink-0">
+                <div>
+                  <h2 id="connect-wallet-title" className="text-lg font-bold text-ink">
+                    Connect wallet
+                  </h2>
+                  <p className="text-xs text-ink-3 mt-0.5">
+                    Robinhood Chain · chain ID {robinhood.id}
                   </p>
-                  <a
-                    href="https://metamask.io/download/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex mt-4 text-sm font-semibold text-hood hover:underline"
-                  >
-                    Get MetaMask →
-                  </a>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-2 hover:bg-surface-2 cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-3 space-y-2 overflow-y-auto flex-1">
+                {list.length === 0 && (
+                  <div className="px-3 py-8 text-center">
+                    <Wallet className="w-8 h-8 text-ink-3 mx-auto mb-3" />
+                    <p className="text-sm font-semibold text-ink">No wallet detected</p>
+                    <p className="text-xs text-ink-3 mt-1.5 max-w-xs mx-auto">
+                      Install MetaMask or another browser extension, then refresh this page.
+                    </p>
+                    <a
+                      href="https://metamask.io/download/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex mt-4 text-sm font-semibold text-hood hover:underline"
+                    >
+                      Get MetaMask →
+                    </a>
+                  </div>
+                )}
+
+                {list.map((connector) => {
+                  const pending = pendingId === connector.uid
+                  return (
+                    <button
+                      key={connector.uid}
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => void onConnect(connector)}
+                      className={clsx(
+                        'w-full flex items-center gap-3 px-3.5 py-3.5 rounded-xl border transition-colors cursor-pointer text-left disabled:opacity-60',
+                        pending
+                          ? 'border-hood bg-hood-muted'
+                          : 'border-edge bg-surface-2 hover:border-hood/50 hover:bg-hood-muted'
+                      )}
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-surface border border-edge flex items-center justify-center shrink-0 overflow-hidden">
+                        {connector.icon ? (
+                          <img
+                            src={connector.icon}
+                            alt=""
+                            className="w-7 h-7 object-contain"
+                            onError={(e) => {
+                              ;(e.target as HTMLImageElement).style.display = 'none'
+                            }}
+                          />
+                        ) : (
+                          <Wallet className="w-5 h-5 text-hood" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-ink">
+                          {labelFor(connector)}
+                        </div>
+                        <div className="text-[11px] text-ink-3">
+                          {pending ? 'Confirm in wallet…' : 'Browser extension'}
+                        </div>
+                      </div>
+                      {pending ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-hood shrink-0" />
+                      ) : (
+                        <span className="text-xs font-semibold text-hood shrink-0">Connect</span>
+                      )}
+                    </button>
+                  )
+                })}
+
+                {list.length > 0 && (
+                  <p className="text-[11px] text-ink-3 px-1 pt-1">
+                    Don’t see your wallet? Unlock the extension and refresh.
+                  </p>
+                )}
+              </div>
+
+              {(localError || error) && (
+                <div className="mx-3 mb-2 px-3 py-2.5 rounded-xl bg-[rgba(255,80,0,0.1)] border border-[rgba(255,80,0,0.25)] text-[var(--color-danger)] text-xs leading-relaxed">
+                  {localError ||
+                    (error?.message?.match(/reject|denied|cancel/i)
+                      ? 'Connection rejected in your wallet.'
+                      : error?.message) ||
+                    'Failed to connect'}
                 </div>
               )}
 
-              {list.map((connector) => {
-                const pending = pendingId === connector.uid
-                return (
-                  <button
-                    key={connector.uid}
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => void onConnect(connector)}
-                    className={clsx(
-                      'w-full flex items-center gap-3 px-3.5 py-3.5 rounded-xl border transition-colors cursor-pointer text-left disabled:opacity-60',
-                      pending
-                        ? 'border-hood bg-hood-muted'
-                        : 'border-edge bg-surface-2 hover:border-hood/50 hover:bg-hood-muted'
-                    )}
-                  >
-                    <div className="w-11 h-11 rounded-xl bg-surface border border-edge flex items-center justify-center shrink-0 overflow-hidden">
-                      {connector.icon ? (
-                        <img
-                          src={connector.icon}
-                          alt=""
-                          className="w-7 h-7 object-contain"
-                          onError={(e) => {
-                            ;(e.target as HTMLImageElement).style.display = 'none'
-                          }}
-                        />
-                      ) : (
-                        <Wallet className="w-5 h-5 text-hood" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-ink">{labelFor(connector)}</div>
-                      <div className="text-[11px] text-ink-3">
-                        {pending ? 'Confirm in wallet…' : 'Browser extension'}
-                      </div>
-                    </div>
-                    {pending ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-hood shrink-0" />
-                    ) : (
-                      <span className="text-xs font-semibold text-hood shrink-0">Connect</span>
-                    )}
-                  </button>
-                )
-              })}
-
-              {/* Always offer generic injected as last resort if not already listed */}
-              {list.length > 0 && !list.some((c) => c.id === 'injected') && (
-                <p className="text-[11px] text-ink-3 px-1 pt-1">
-                  Don’t see your wallet? Unlock the extension and refresh.
+              <div className="px-5 py-3 border-t border-edge bg-surface-2/60 shrink-0">
+                <p className="text-[11px] text-ink-3 leading-relaxed">
+                  OpenHood uses{' '}
+                  <span className="text-ink font-semibold">Robinhood Chain</span> (ID{' '}
+                  {robinhood.id}). Your wallet will prompt to add/switch if needed.
                 </p>
-              )}
-            </div>
-
-            {(localError || error) && (
-              <div className="mx-3 mb-2 px-3 py-2.5 rounded-xl bg-[rgba(255,80,0,0.1)] border border-[rgba(255,80,0,0.25)] text-[var(--color-danger)] text-xs leading-relaxed">
-                {localError ||
-                  (error?.message?.match(/reject|denied|cancel/i)
-                    ? 'Connection rejected in your wallet.'
-                    : error?.message) ||
-                  'Failed to connect'}
               </div>
-            )}
-
-            <div className="px-5 py-3 border-t border-edge bg-surface-2/60 shrink-0">
-              <p className="text-[11px] text-ink-3 leading-relaxed">
-                OpenHood uses <span className="text-ink font-semibold">Robinhood Chain</span>{' '}
-                (ID {robinhood.id}). Your wallet will prompt to add/switch if needed.
-              </p>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </>
   )
 }

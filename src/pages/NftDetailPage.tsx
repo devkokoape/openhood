@@ -11,8 +11,17 @@ import { buildTraitStats, rankByRarity } from '../lib/traits'
 
 export function NftDetailPage() {
   const { id } = useParams()
-  const { nfts, collections, buy, list, user, connected, connect, offers, activities } =
-    useMarketplace()
+  const {
+    nfts,
+    collections,
+    buy,
+    list,
+    connected,
+    connect,
+    offers,
+    activities,
+    isOwnerOf,
+  } = useMarketplace()
   const [offerOpen, setOfferOpen] = useState(false)
   const [listOpen, setListOpen] = useState(false)
   const [listPrice, setListPrice] = useState('')
@@ -42,7 +51,7 @@ export function NftDetailPage() {
     )
   }
 
-  const isOwner = connected && user === nft.owner
+  const isOwner = connected && isOwnerOf(nft.owner)
 
   const handleBuy = () => {
     if (!connected) {
@@ -52,15 +61,25 @@ export function NftDetailPage() {
     if (buy(nft.id)) {
       setToast('Purchase successful!')
       setTimeout(() => setToast(''), 2500)
+    } else {
+      setToast('Purchase failed — item may be unlisted')
+      setTimeout(() => setToast(''), 2500)
     }
   }
 
   const handleList = () => {
+    if (!connected) {
+      connect()
+      return
+    }
     const p = parseFloat(listPrice)
-    if (!p || p <= 0) return
+    if (!p || p <= 0 || Number.isNaN(p)) return
     if (list(nft.id, p)) {
       setListOpen(false)
       setToast('Listed successfully')
+      setTimeout(() => setToast(''), 2500)
+    } else {
+      setToast('Could not list — check ownership')
       setTimeout(() => setToast(''), 2500)
     }
   }

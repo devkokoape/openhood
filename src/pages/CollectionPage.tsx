@@ -80,8 +80,18 @@ const mainTabs = [
 export function CollectionPage() {
   const { slug } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { collections, nfts, offers, activities, user, bulkBuy, connected, connect } =
-    useMarketplace()
+  const {
+    collections,
+    nfts,
+    offers,
+    activities,
+    user,
+    bulkBuy,
+    connected,
+    connect,
+    isFounderOf,
+    actor,
+  } = useMarketplace()
   const [tab, setTab] = useState('items')
   const [offerOpen, setOfferOpen] = useState(false)
   const [sort, setSort] = useState<SortKey>('price_asc')
@@ -167,9 +177,16 @@ export function CollectionPage() {
 
   const sweepable = useMemo(() => {
     return items
-      .filter((n) => n.listed && n.price != null && n.owner !== user)
+      .filter(
+        (n) =>
+          n.listed &&
+          n.price != null &&
+          n.owner !== user &&
+          n.owner !== actor &&
+          (!actor || n.owner.toLowerCase() !== actor.toLowerCase())
+      )
       .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
-  }, [items, user])
+  }, [items, user, actor])
 
   const colOffers = useMemo(
     () => (collection ? offers.filter((o) => o.collectionId === collection.id) : []),
@@ -243,7 +260,9 @@ export function CollectionPage() {
     )
   }
 
-  const isFounder = user === collection.founder
+  const isFounder =
+    isFounderOf(collection.founder) ||
+    (collection.slug === 'open-pixels' && connected) // demo founder tools
   const descLong = collection.description.length > 140
 
   return (
@@ -679,7 +698,10 @@ export function CollectionPage() {
                     {items.map((n) => {
                       const rank = rarityMap.get(n.id)?.rarityRank
                       const canSelect =
-                        sweepMode && n.listed && n.price != null && n.owner !== user
+                        sweepMode &&
+                        n.listed &&
+                        n.price != null &&
+                        sweepable.some((s) => s.id === n.id)
                       return (
                         <div key={n.id} className="relative">
                           {rank != null && !sweepMode && (

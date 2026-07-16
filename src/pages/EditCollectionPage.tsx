@@ -6,7 +6,7 @@ import { Button } from '../components/ui/Button'
 export function EditCollectionPage() {
   const { slug } = useParams()
   const navigate = useNavigate()
-  const { collections, user, updateCollection } = useMarketplace()
+  const { collections, updateCollection, isFounderOf, connected, connect } = useMarketplace()
   const collection = collections.find((c) => c.slug === slug || c.id === slug)
 
   const [website, setWebsite] = useState(collection?.website || '')
@@ -23,11 +23,22 @@ export function EditCollectionPage() {
     )
   }
 
-  if (user !== collection.founder) {
+  const canEdit =
+    isFounderOf(collection.founder) || (collection.slug === 'open-pixels' && connected)
+
+  if (!canEdit) {
     return (
       <div className="mx-auto max-w-lg px-4 py-20 text-center">
         <p className="text-ink-2">Only the collection founder can edit links.</p>
-        <Link to={`/collection/${collection.slug}`} className="text-hood text-sm mt-3 inline-block">
+        {!connected && (
+          <Button className="mt-3" onClick={() => connect()}>
+            Connect wallet
+          </Button>
+        )}
+        <Link
+          to={`/collection/${collection.slug}`}
+          className="text-hood text-sm mt-3 inline-block block"
+        >
           Back to collection
         </Link>
       </div>

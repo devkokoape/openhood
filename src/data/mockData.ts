@@ -203,10 +203,7 @@ export function formatPrice(n?: number): string {
   return n.toPrecision(3)
 }
 
-export function formatAddress(addr: string): string {
-  if (addr.length <= 12) return addr
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
-}
+export { formatAddress } from '../lib/address'
 
 export function timeAgo(iso: string): string {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)

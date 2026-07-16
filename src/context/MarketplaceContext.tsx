@@ -6,14 +6,13 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useDisconnect } from 'wagmi'
 import type { Activity, Collection, MintDrop, Nft, Offer } from '../types'
 import {
   activities as seedActivities,
   bulkBuy as doBulkBuy,
   buyNft as doBuy,
   collections as seedCollections,
-  formatAddress,
   listNft as doList,
   mintDrops as seedMints,
   mintFromDrop as doMint,
@@ -22,16 +21,19 @@ import {
   addOffer as doAddOffer,
   updateCollectionLinks as doUpdateLinks,
 } from '../data/mockData'
+import { actorId, formatAddress, sameAddress } from '../lib/address'
+import { openConnectWallet } from '../lib/walletUi'
 
 interface MarketplaceCtx {
   /** Short display address, or empty when disconnected */
   user: string
   /** Full wallet address when connected */
   address: string | undefined
+  /** Canonical id used for ownership / offers (lowercase full address) */
+  actor: string
   connected: boolean
-  /** @deprecated Use ConnectWallet / wagmi connect — kept for compatibility */
+  /** Opens the Connect Wallet modal */
   connect: () => void
-  /** @deprecated Use ConnectWallet disconnect */
   disconnect: () => void
   collections: Collection[]
   nfts: Nft[]
@@ -48,66 +50,113 @@ interface MarketplaceCtx {
     id: string,
     links: { website?: string; twitter?: string; discord?: string; description?: string }
   ) => boolean
+  isOwnerOf: (ownerField: string) => boolean
+  isFounderOf: (founderField: string) => boolean
 }
 
 const MarketplaceContext = createContext<MarketplaceCtx | null>(null)
 
 export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const { address, isConnected } = useAccount()
+  const { disconnect: wagmiDisconnect } = useDisconnect()
   const [tick, setTick] = useState(0)
 
   const refresh = useCallback(() => setTick((t) => t + 1), [])
 
-  const user = isConnected && address ? formatAddress(address) : ''
   const connected = Boolean(isConnected && address)
-  // Full address used for ownership / trades when connected
-  const actor = address || ''
+  const actor = connected && address ? actorId(address) : ''
+  const user = actor ? formatAddress(address!) : ''
 
-  const collections = useMemo(() => [...seedCollections], [tick])
-  const nfts = useMemo(() => [...seedNfts], [tick])
-  const offers = useMemo(() => [...seedOffers], [tick])
-  const activities = useMemo(() => [...seedActivities], [tick])
-  const mintDrops = useMemo(() => [...seedMints], [tick])
+  // tick forces re-read of mutated module-level mock stores after actions
+  const collections = useMemo(() => {
+    void tick
+    return [...seedCollections]
+  }, [tick])
+  const nfts = useMemo(() => {
+    void tick
+    return [...seedNfts]
+  }, [tick])
+  const offers = useMemo(() => {
+    void tick
+    return [...seedOffers]
+  }, [tick])
+  const activities = useMemo(() => {
+    void tick
+    return [...seedActivities]
+  }, [tick])
+  const mintDrops = useMemo(() => {
+    void tick
+    return [...seedMints]
+  }, [tick])
 
-  // Compatibility stubs — real connect UI is ConnectWallet
-  const connect = () => {
-    /* no-op: open ConnectWallet modal via UI */
-  }
-  const disconnect = () => {
-    /* no-op */
-  }
+  const connect = useCallback(() => {
+    openConnectWallet()
+  }, [])
+
+  const disconnect = useCallback(() => {
+    wagmiDisconnect()
+  }, [wagmiDisconnect])
+
+  const isOwnerOf = useCallback(
+    (ownerField: string) => sameAddress(ownerField, actor) || sameAddress(ownerField, address),
+    [actor, address]
+  )
+
+  const isFounderOf = useCallback(
+    (founderField: string) => sameAddress(founderField, actor) || sameAddress(founderField, address),
+    [actor, address]
+  )
 
   const buy = (nftId: string) => {
-    if (!actor) return false
-    const ok = doBuy(nftId, formatAddress(actor))
+    if (!actor) {
+      openConnectWallet()
+      return false
+    }
+    const ok = doBuy(nftId, actor)
     if (ok) refresh()
     return ok
   }
 
   const bulkBuy = (nftIds: string[]) => {
-    if (!actor) return 0
-    const n = doBulkBuy(nftIds, formatAddress(actor))
+    if (!actor) {
+      openConnectWallet()
+      return 0
+    }
+    const n = doBulkBuy(nftIds, actor)
     if (n > 0) refresh()
     return n
   }
 
   const list = (nftId: string, price: number) => {
+    if (!actor) {
+      openConnectWallet()
+      return false
+    }
+    const nft = seedNfts.find((n) => n.id === nftId)
+    if (nft && !sameAddress(nft.owner, actor)) return false
     const ok = doList(nftId, price)
     if (ok) refresh()
     return ok
   }
 
   const mint = (slug: string, quantity: number) => {
-    if (!actor) return 0
-    const n = doMint(slug, formatAddress(actor), quantity)
+    if (!actor) {
+      openConnectWallet()
+      return 0
+    }
+    const n = doMint(slug, actor, quantity)
     if (n > 0) refresh()
     return n
   }
 
   const makeOffer = (offer: Omit<Offer, 'id' | 'createdAt'>) => {
+    if (!actor) {
+      openConnectWallet()
+      throw new Error('Connect wallet to make an offer')
+    }
     const o = doAddOffer({
       ...offer,
-      offerer: actor ? formatAddress(actor) : offer.offerer,
+      offerer: actor,
     })
     refresh()
     return o
@@ -117,6 +166,15 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
     id: string,
     links: { website?: string; twitter?: string; discord?: string; description?: string }
   ) => {
+    if (!connected) {
+      openConnectWallet()
+      return false
+    }
+    const col = seedCollections.find((c) => c.id === id)
+    if (!col) return false
+    const allowed =
+      isFounderOf(col.founder) || (col.slug === 'open-pixels' && connected)
+    if (!allowed) return false
     const ok = doUpdateLinks(id, links)
     if (ok) refresh()
     return ok
@@ -127,6 +185,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         address,
+        actor,
         connected,
         connect,
         disconnect,
@@ -142,6 +201,8 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         mint,
         makeOffer,
         updateCollection,
+        isOwnerOf,
+        isFounderOf,
       }}
     >
       {children}

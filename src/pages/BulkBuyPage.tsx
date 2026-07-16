@@ -7,7 +7,8 @@ import { Button } from '../components/ui/Button'
 import { formatPrice } from '../data/mockData'
 
 export function BulkBuyPage() {
-  const { collections, nfts, bulkBuy, connected, connect, user } = useMarketplace()
+  const { collections, nfts, bulkBuy, connected, connect, user, actor, isOwnerOf } =
+    useMarketplace()
   const [params] = useSearchParams()
   const initialSlug = params.get('collection') || ''
   const [collectionId, setCollectionId] = useState(() => {
@@ -19,9 +20,17 @@ export function BulkBuyPage() {
 
   const listed = useMemo(() => {
     return nfts
-      .filter((n) => n.collectionId === collectionId && n.listed && n.price != null && n.owner !== user)
+      .filter(
+        (n) =>
+          n.collectionId === collectionId &&
+          n.listed &&
+          n.price != null &&
+          !isOwnerOf(n.owner) &&
+          n.owner !== user &&
+          n.owner !== actor
+      )
       .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
-  }, [nfts, collectionId, user])
+  }, [nfts, collectionId, user, actor, isOwnerOf])
 
   const selectedNfts = listed.filter((n) => selected.has(n.id))
   const total = selectedNfts.reduce((s, n) => s + (n.price ?? 0), 0)

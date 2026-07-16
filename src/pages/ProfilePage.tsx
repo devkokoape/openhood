@@ -10,10 +10,19 @@ import { ConnectWallet } from '../components/wallet/ConnectWallet'
 
 export function ProfilePage() {
   const { address: routeAddress } = useParams()
-  const { user, address: walletAddress, connected, nfts, activities, collections, offers } =
-    useMarketplace()
+  const {
+    user,
+    address: walletAddress,
+    actor,
+    connected,
+    nfts,
+    activities,
+    collections,
+    offers,
+    isOwnerOf,
+  } = useMarketplace()
   // Prefer full wallet address for self profile
-  const addr = routeAddress || walletAddress || user || ''
+  const addr = routeAddress || walletAddress || actor || user || ''
   const profile = profiles[addr] || profiles[user] || {
     address: addr,
     displayName: connected && !routeAddress ? 'Your wallet' : addr || 'Not connected',
@@ -26,7 +35,19 @@ export function ProfilePage() {
 
   const [tab, setTab] = useState('collected')
 
-  const owned = useMemo(() => nfts.filter((n) => n.owner === addr), [nfts, addr])
+  const owned = useMemo(() => {
+    if (!addr && !actor) return []
+    // Self profile: match by ownership helper; other profiles: exact / sameAddress
+    if (!routeAddress && connected) {
+      return nfts.filter((n) => isOwnerOf(n.owner))
+    }
+    return nfts.filter(
+      (n) =>
+        n.owner === addr ||
+        n.owner.toLowerCase() === addr.toLowerCase() ||
+        (actor && n.owner === actor)
+    )
+  }, [nfts, addr, actor, routeAddress, connected, isOwnerOf])
 
   const byCollection = useMemo(() => {
     const map = new Map<string, typeof owned>()
@@ -41,12 +62,29 @@ export function ProfilePage() {
     }))
   }, [owned, collections])
 
-  const userActivity = useMemo(
-    () => activities.filter((a) => a.from === addr || a.to === addr),
-    [activities, addr]
-  )
+  const userActivity = useMemo(() => {
+    if (!routeAddress && connected) {
+      return activities.filter(
+        (a) => isOwnerOf(a.from) || (a.to ? isOwnerOf(a.to) : false)
+      )
+    }
+    return activities.filter(
+      (a) =>
+        a.from === addr ||
+        a.to === addr ||
+        a.from.toLowerCase() === addr.toLowerCase() ||
+        (a.to && a.to.toLowerCase() === addr.toLowerCase())
+    )
+  }, [activities, addr, routeAddress, connected, isOwnerOf])
 
-  const userOffers = useMemo(() => offers.filter((o) => o.offerer === addr), [offers, addr])
+  const userOffers = useMemo(() => {
+    if (!routeAddress && connected) {
+      return offers.filter((o) => isOwnerOf(o.offerer))
+    }
+    return offers.filter(
+      (o) => o.offerer === addr || o.offerer.toLowerCase() === addr.toLowerCase()
+    )
+  }, [offers, addr, routeAddress, connected, isOwnerOf])
 
   const estValue = owned.reduce((s, n) => {
     const col = collections.find((c) => c.id === n.collectionId)

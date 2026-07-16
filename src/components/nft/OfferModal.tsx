@@ -31,7 +31,12 @@ export function OfferModal({
 }: Props) {
   const { makeOffer, user, connected, connect } = useMarketplace()
   const type: OfferType = collectionOfferOnly ? 'collection' : 'item'
-  const [price, setPrice] = useState(floorPrice ? String(+(floorPrice * 0.9).toFixed(4)) : '')
+  const defaultPrice = (fp?: number) => {
+    if (fp == null || fp <= 0) return ''
+    const v = fp * 0.9
+    return String(v >= 0.01 ? +v.toFixed(4) : +v.toPrecision(4))
+  }
+  const [price, setPrice] = useState(defaultPrice(floorPrice))
   const [quantity, setQuantity] = useState('1')
   const [days, setDays] = useState('7')
   const [done, setDone] = useState(false)
@@ -39,7 +44,7 @@ export function OfferModal({
   useEffect(() => {
     if (open) {
       setDone(false)
-      setPrice(floorPrice ? String(+(floorPrice * 0.9).toFixed(4)) : '')
+      setPrice(defaultPrice(floorPrice))
       setQuantity('1')
     }
   }, [open, floorPrice])
@@ -53,18 +58,22 @@ export function OfferModal({
       return
     }
     const p = parseFloat(price)
-    if (!p || p <= 0) return
+    if (!p || p <= 0 || Number.isNaN(p)) return
     const expiresAt = new Date(Date.now() + parseInt(days, 10) * 86400_000).toISOString()
-    makeOffer({
-      type,
-      collectionId,
-      nftId: type === 'item' ? nftId : undefined,
-      offerer: user,
-      price: p,
-      quantity: type === 'collection' ? parseInt(quantity, 10) || 1 : undefined,
-      expiresAt,
-    })
-    setDone(true)
+    try {
+      makeOffer({
+        type,
+        collectionId,
+        nftId: type === 'item' ? nftId : undefined,
+        offerer: user || 'unknown',
+        price: p,
+        quantity: type === 'collection' ? parseInt(quantity, 10) || 1 : undefined,
+        expiresAt,
+      })
+      setDone(true)
+    } catch {
+      connect()
+    }
   }
 
   const handleClose = () => {

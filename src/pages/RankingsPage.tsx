@@ -252,12 +252,16 @@ export function RankingsPage() {
                       </td>
                       <td className="px-3 py-2.5 text-ink-2">{row.trait_type}</td>
                       <td className="px-3 py-2.5">
-                        <Link
-                          to={`/collection/${col?.slug}?trait=${encodeURIComponent(row.trait_type)}&value=${encodeURIComponent(row.value)}`}
-                          className="font-semibold text-ink hover:text-hood"
-                        >
-                          {row.value}
-                        </Link>
+                        {col ? (
+                          <Link
+                            to={`/collection/${col.slug}?trait=${encodeURIComponent(row.trait_type)}&value=${encodeURIComponent(row.value)}`}
+                            className="font-semibold text-ink hover:text-hood"
+                          >
+                            {row.value}
+                          </Link>
+                        ) : (
+                          <span className="font-semibold text-ink">{row.value}</span>
+                        )}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-2">
                         {row.count}

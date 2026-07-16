@@ -17,9 +17,17 @@ export function FeaturedHero({ collections }: { collections: Collection[] }) {
     return () => clearInterval(t)
   }, [slides.length, paused])
 
-  if (slides.length === 0) return null
+  if (slides.length === 0) {
+    return (
+      <section className="relative w-full rounded-2xl border border-edge bg-surface-2 h-[200px] flex items-center justify-center">
+        <p className="text-sm text-ink-3">No collections to feature yet.</p>
+      </section>
+    )
+  }
 
-  const active = slides[index]
+  // Guard against stale index when list shrinks (e.g. search filter)
+  const safeIndex = index % slides.length
+  const active = slides[safeIndex]
 
   const prev = () => setIndex((i) => (i - 1 + slides.length) % slides.length)
   const next = () => setIndex((i) => (i + 1) % slides.length)
@@ -37,7 +45,7 @@ export function FeaturedHero({ collections }: { collections: Collection[] }) {
             key={c.id}
             className={clsx(
               'absolute inset-0 transition-all duration-700 ease-out',
-              i === index ? 'opacity-100 scale-100 z-10' : 'opacity-0 scale-105 z-0 pointer-events-none'
+              i === safeIndex ? 'opacity-100 scale-100 z-10' : 'opacity-0 scale-105 z-0 pointer-events-none'
             )}
           >
             <img
@@ -116,7 +124,7 @@ export function FeaturedHero({ collections }: { collections: Collection[] }) {
             {/* Rank badge */}
             <div className="hidden md:flex flex-col items-end gap-2 shrink-0 pb-1">
               <div className="px-3 py-1.5 rounded-full bg-hood text-[#0b0e11] text-xs font-bold shadow-lg shadow-hood/30">
-                #{index + 1} Trending
+                #{safeIndex + 1} Trending
               </div>
             </div>
           </div>
