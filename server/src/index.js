@@ -245,10 +245,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/v1/collections') {
-      // Cap payload size for mobile clients (default 100; max 300)
+      // Cap payload size for mobile clients (default 80; max 200)
       const limit = Math.min(
-        300,
-        Math.max(1, Number(url.searchParams.get('limit') || 100))
+        200,
+        Math.max(1, Number(url.searchParams.get('limit') || 80))
       )
       let rows = listCollections().map(summarize)
       // Prefer markets with volume / listings first
@@ -264,7 +264,70 @@ const server = http.createServer(async (req, res) => {
         res,
         200,
         { collections: rows, count: rows.length, total },
-        5
+        15
+      )
+    }
+
+    // GET /v1/home — OpenSea/MagicEden-style thin home feed (one request)
+    if (req.method === 'GET' && pathname === '/v1/home') {
+      const limit = Math.min(
+        60,
+        Math.max(8, Number(url.searchParams.get('limit') || 36))
+      )
+      const VERIFIED_MIN = Number(process.env.VERIFIED_MIN_VOLUME_ETH || 3)
+      let rows = listCollections().map(summarize)
+      rows = [...rows].sort((a, b) => {
+        const av = (a.volumeTotal || 0) >= VERIFIED_MIN ? 1 : 0
+        const bv = (b.volumeTotal || 0) >= VERIFIED_MIN ? 1 : 0
+        if (bv !== av) return bv - av
+        return (
+          (b.volume24h || 0) - (a.volume24h || 0) ||
+          (b.volumeTotal || 0) - (a.volumeTotal || 0) ||
+          (b.listedCount || 0) - (a.listedCount || 0)
+        )
+      })
+      const top = rows.slice(0, limit).map((r) => ({
+        slug: r.slug,
+        collectionId: r.collectionId,
+        name: r.name,
+        image: r.image,
+        banner: r.banner,
+        floorPrice: r.floorPrice,
+        volume24h: r.volume24h,
+        volumeTotal: r.volumeTotal,
+        owners: r.owners,
+        items: r.items,
+        listedCount: r.listedCount,
+        listedPct: r.listedPct,
+        contractAddress: r.contractAddress,
+        chain: r.chain || 'robinhood',
+        verified: (r.volumeTotal || 0) >= VERIFIED_MIN,
+      }))
+      const stats = {
+        collections: rows.length,
+        listedTotal: rows.reduce((s, r) => s + (r.listedCount || 0), 0),
+        volume24h: rows.reduce((s, r) => s + (r.volume24h || 0), 0),
+        verified: rows.filter((r) => (r.volumeTotal || 0) >= VERIFIED_MIN)
+          .length,
+      }
+      // Light activity sample from top collection if present
+      let activity = []
+      const first = getCollection(top[0]?.slug)
+      if (first?.activities?.length) {
+        activity = first.activities.slice(0, 12)
+      }
+      return json(
+        res,
+        200,
+        {
+          generatedAt: new Date().toISOString(),
+          stats,
+          collections: top,
+          activity,
+          trending: top.slice(0, 12),
+          featured: top.slice(0, 6),
+        },
+        20
       )
     }
 

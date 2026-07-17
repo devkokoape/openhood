@@ -191,25 +191,36 @@ export function useOpenSeaLive() {
       const max = maxDiscoverCollections()
       const lite = preferLiteMode()
 
-      // 1) Fly first — shared catalog, no browser OpenSea storm
+      // Fly-only discovery when indexer is available (OpenSea/ME style: thin server feed)
       if (hasIndexerUrl()) {
-        const rows = await fetchIndexerCollections({ limit: max })
-        if (rows?.length) {
-          setIndexerCols(rows.map(indexerRowToCollection))
+        // Prefer dedicated home feed (pre-ranked, small payload)
+        const { fetchHomeFeed } = await import('../lib/indexerApi')
+        const home = await fetchHomeFeed(max)
+        if (home?.collections?.length) {
+          setIndexerCols(home.collections.map(indexerRowToCollection))
           setStatus((s) => ({
             ...s,
-            discovered: rows.length,
+            discovered: home.collections.length,
             live: true,
             lastOkAt: Date.now(),
           }))
+        } else {
+          const rows = await fetchIndexerCollections({ limit: max })
+          if (rows?.length) {
+            setIndexerCols(rows.map(indexerRowToCollection))
+            setStatus((s) => ({
+              ...s,
+              discovered: rows.length,
+              live: true,
+              lastOkAt: Date.now(),
+            }))
+          }
         }
-      }
-
-      // 2) OpenSea mass-list only when Fly missing AND not on a phone
-      if (!hasIndexerUrl() && !lite) {
+      } else if (!lite) {
+        // Fallback only without Fly
         const rows = await fetchAllRobinhoodCollections({
-          maxPages: 2,
-          pageSize: 50,
+          maxPages: 1,
+          pageSize: Math.min(50, max),
         })
         if (rows.length) {
           const mapped = rows
@@ -244,6 +255,19 @@ export function useOpenSeaLive() {
     if (typeof document !== 'undefined' && document.hidden) return
     const cols = collectionsRef.current
     if (!cols.length) return
+    // When Fly already supplies floors, skip OpenSea browser stats thrash
+    if (hasIndexerUrl()) {
+      const withFloor = cols.filter((c) => (c.floorPrice || 0) > 0).length
+      if (withFloor >= Math.min(8, cols.length)) {
+        setStatus((s) => ({
+          ...s,
+          live: true,
+          lastOkAt: Date.now(),
+          refreshing: false,
+        }))
+        return
+      }
+    }
     busy.current = true
     setStatus((s) => ({ ...s, refreshing: true }))
     try {

@@ -274,7 +274,17 @@ export function useOpenSeaCollectionNfts(
                 nftsMapped.filter((n) => n.listed).length
             )
             setTotalLoaded(nftsMapped.length)
-            setHasMore(Boolean((remote as { hasMore?: boolean }).hasMore))
+            const nftsTotal =
+              (remote as { nftsTotal?: number }).nftsTotal ||
+              remote.listedCount ||
+              nftsMapped.length
+            // OpenSea-style: only first page; more via explicit Load more
+            setHasMore(
+              Boolean((remote as { hasMore?: boolean }).hasMore) ||
+                nftsMapped.length < Math.min(hardCap, nftsTotal)
+            )
+            // Track Fly offset for loadMore
+            nextRef.current = String(nftsMapped.length)
             setActivities(acts)
             setOffers(offs)
             activitiesRef.current = acts
@@ -286,7 +296,10 @@ export function useOpenSeaCollectionNfts(
             const stubCount = nftsMapped.filter((n) =>
               nftNeedsMetadata(n, fallbackImage)
             ).length
-            setEnriching(stubCount > 0)
+            // Only enrich a small first screen — never pull the whole book
+            const shouldEnrich =
+              stubCount > 0 && stubCount >= Math.min(8, nftsMapped.length * 0.25)
+            setEnriching(shouldEnrich)
             cacheOpenSeaNfts(nftsMapped)
             void persist({
               slug: slugName,
@@ -297,9 +310,8 @@ export function useOpenSeaCollectionNfts(
               offers: offs,
             })
 
-            // If Fly still has stubs / empty traits, fill from OpenSea in background
-            // Catalog pages (50/req) first — much faster than only per-token
-            if (stubCount > 0 && !cancelled) {
+            // Light first-screen enrich only (ME/OpenSea paint prices first)
+            if (shouldEnrich && !cancelled) {
               void (async () => {
                 let working = nftsMapped
                 try {
@@ -308,7 +320,7 @@ export function useOpenSeaCollectionNfts(
                     colId,
                     working,
                     {
-                      maxPages: preferLiteMode() ? 6 : 40,
+                      maxPages: preferLiteMode() ? 2 : 4,
                       collectionImage: fallbackImage,
                       signal,
                       onProgress: (partial) => {
@@ -415,138 +427,44 @@ export function useOpenSeaCollectionNfts(
               })()
             }
 
-            // Background: pull next chunks from Fly (hard-capped — mobile RAM)
-            const nftsTotal = Math.min(
-              hardCap,
-              (remote as { nftsTotal?: number }).nftsTotal ||
-                remote.listedCount ||
-                nftsMapped.length
-            )
-            if (nftsTotal > nftsMapped.length && !cancelled && !preferLiteMode()) {
+            // NO auto-pagination — OpenSea/ME style: user taps "Load more"
+            // Optional light re-poll once for server art (not a loop)
+            if (shouldEnrich && !cancelled) {
               void (async () => {
-                let offset = nftsMapped.length
-                while (
-                  offset < nftsTotal &&
-                  !cancelled &&
-                  gen === abortGen.current
-                ) {
-                  const page = await fetchIndexerCollection(slugName, {
-                    lite: true,
-                    limit: Math.min(100, nftsTotal - offset),
-                    offset,
-                  })
-                  if (!page?.nfts?.length) break
-                  const more = mapRemote(page.nfts)
-                  for (const n of more) seenIds.current.add(n.id)
-                  nftsMapped = [...nftsMapped, ...more].slice(0, hardCap)
-                  setNfts([...nftsMapped])
-                  setTotalLoaded(nftsMapped.length)
-                  setHasMore(
-                    Boolean((page as { hasMore?: boolean }).hasMore) &&
-                      nftsMapped.length < hardCap
+                await new Promise((r) => setTimeout(r, 8000))
+                if (cancelled || gen !== abortGen.current) return
+                const again = await fetchIndexerCollection(slugName, {
+                  lite: true,
+                  limit: firstLimit,
+                })
+                if (!again?.nfts?.length) return
+                const mapped = mapRemote(again.nfts)
+                setNfts((prevList) => {
+                  const byTok = new Map(
+                    prevList.map((n) => [String(n.tokenId), n])
                   )
-                  cacheOpenSeaNfts(more)
-                  offset += more.length
-                  if (!(page as { hasMore?: boolean }).hasMore) break
-                  await new Promise((r) => setTimeout(r, 80))
-                }
-                if (!cancelled && gen === abortGen.current) {
-                  void persist({
-                    slug: slugName,
-                    collectionId: colId,
-                    nfts: nftsMapped,
-                    listedCount: remote.listedCount || nftsMapped.length,
-                    activities: acts,
-                    offers: offs,
-                  })
-                }
-              })()
-            }
-
-            // Poll Fly for better art as server enriches (not browser OpenSea)
-            const pollMissing = nftsMapped.filter((n) =>
-              nftNeedsMetadata(n, fallbackImage)
-            ).length
-            if (pollMissing > 5 && !cancelled) {
-              void (async () => {
-                for (let i = 0; i < 6; i++) {
-                  if (cancelled || gen !== abortGen.current) return
-                  await new Promise((r) => setTimeout(r, 5000))
-                  const again = await fetchIndexerCollection(slugName, {
-                    lite: true,
-                    limit: Math.min(300, nftsMapped.length || 120),
-                  })
-                  if (!again?.nfts?.length) continue
-                  const mapped = mapRemote(again.nfts)
-                  // Field-level merge — never clobber good client art/traits with stubs
-                  setNfts((prevList) => {
-                    const byTok = new Map(
-                      prevList.map((n) => [String(n.tokenId), n])
-                    )
-                    for (const n of mapped) {
-                      const prev = byTok.get(String(n.tokenId))
-                      if (!prev) {
-                        byTok.set(String(n.tokenId), n)
-                        continue
-                      }
-                      const prevNeeds = nftNeedsMetadata(prev, fallbackImage)
-                      const nextGood = !nftNeedsMetadata(n, fallbackImage)
-                      if (prevNeeds && nextGood) {
-                        byTok.set(String(n.tokenId), {
-                          ...prev,
-                          ...n,
-                          image:
-                            n.image &&
-                            !n.image.includes('dicebear') &&
-                            !n.image.startsWith('data:image/svg')
-                              ? n.image
-                              : prev.image,
-                          traits:
-                            Array.isArray(n.traits) && n.traits.length > 2
-                              ? n.traits
-                              : prev.traits,
-                        })
-                      } else if (prevNeeds) {
-                        // both incomplete — keep better image if any
-                        byTok.set(String(n.tokenId), {
-                          ...prev,
-                          price: n.price ?? prev.price,
-                          listed: n.listed ?? prev.listed,
-                          image:
-                            n.image &&
-                            !n.image.includes('dicebear') &&
-                            !n.image.startsWith('data:image/svg')
-                              ? n.image
-                              : prev.image,
-                          name: n.name && !n.name.startsWith('#') ? n.name : prev.name,
-                          traits:
-                            Array.isArray(n.traits) &&
-                            n.traits.some(
-                              (t) =>
-                                t.trait_type !== 'Status' &&
-                                t.trait_type !== 'Token ID'
-                            )
-                              ? n.traits
-                              : prev.traits,
-                        })
-                      }
-                      // else: prev is good — keep it
+                  for (const n of mapped) {
+                    const prev = byTok.get(String(n.tokenId))
+                    if (!prev) continue
+                    if (
+                      nftNeedsMetadata(prev, fallbackImage) &&
+                      !nftNeedsMetadata(n, fallbackImage)
+                    ) {
+                      byTok.set(String(n.tokenId), {
+                        ...prev,
+                        ...n,
+                        image: n.image || prev.image,
+                        traits:
+                          Array.isArray(n.traits) && n.traits.length > 2
+                            ? n.traits
+                            : prev.traits,
+                      })
                     }
-                    const merged = Array.from(byTok.values()).sort(
-                      (a, b) => (a.price ?? 0) - (b.price ?? 0)
-                    )
-                    nftsMapped = merged
-                    cacheOpenSeaNfts(merged)
-                    return merged
-                  })
-                  const still = nftsMapped.filter((n) =>
-                    nftNeedsMetadata(n, fallbackImage)
-                  ).length
-                  if (still < Math.max(5, nftsMapped.length * 0.15)) {
-                    setEnriching(false)
-                    return
                   }
-                }
+                  const merged = Array.from(byTok.values())
+                  cacheOpenSeaNfts(merged)
+                  return merged
+                })
                 setEnriching(false)
               })()
             } else {
@@ -867,25 +785,75 @@ export function useOpenSeaCollectionNfts(
     }
   }, [slug, enabled])
 
+  /** OpenSea/ME style: one more page only (Fly offset preferred). */
   const loadMore = useCallback(async () => {
     if (!enabled || !slug || !collectionId || loadingMore) return
     setLoadingMore(true)
     try {
+      const hardCap = collectionNftsHardCap()
+      const pageSize = collectionNftsFirstPage()
+
+      if (hasIndexerUrl()) {
+        const offset = Number(nextRef.current || seenIds.current.size || 0)
+        if (offset >= hardCap) {
+          setHasMore(false)
+          return
+        }
+        const page = await fetchIndexerCollection(slug, {
+          lite: true,
+          limit: pageSize,
+          offset,
+        })
+        const raw = page?.nfts || []
+        const mapped = raw.map((n) => ({
+          ...n,
+          collectionId,
+          id: `${collectionId}-os-${n.tokenId}`,
+          traits: Array.isArray(n.traits) ? n.traits : [],
+        }))
+        const fresh = mapped.filter((n) => !seenIds.current.has(n.id))
+        for (const n of fresh) seenIds.current.add(n.id)
+        setNfts((prev) => {
+          const next = [...prev, ...fresh].slice(0, hardCap)
+          setTotalLoaded(next.length)
+          void persist({
+            slug,
+            collectionId,
+            nfts: next,
+            listedCount: page?.listedCount || listedCount,
+          })
+          return next
+        })
+        nextRef.current = String(offset + raw.length)
+        setHasMore(
+          Boolean((page as { hasMore?: boolean } | null)?.hasMore) &&
+            offset + raw.length < hardCap
+        )
+        cacheOpenSeaNfts(fresh)
+        return
+      }
+
+      const osNext =
+        nextRef.current && !/^\d+$/.test(nextRef.current)
+          ? nextRef.current
+          : null
       const page = await fetchOpenSeaCollectionNftsPage(slug, {
-        limit: 50,
-        next: nextRef.current,
+        limit: pageSize,
+        next: osNext,
       })
       const mapped: Nft[] = []
       for (const raw of page.nfts) {
         const n = mapOpenSeaNftToNft(raw, collectionId, pricesRef.current)
         if (!n || seenIds.current.has(n.id)) continue
-        if (pricesRef.current.has(String(n.tokenId))) continue
         seenIds.current.add(n.id)
         mapped.push(n)
       }
       nextRef.current = page.next
       setNfts((prev) => {
-        const next = applyPrices([...prev, ...mapped], pricesRef.current)
+        const next = applyPrices([...prev, ...mapped], pricesRef.current).slice(
+          0,
+          hardCap
+        )
         setTotalLoaded(next.length)
         void persist({
           slug,
@@ -895,7 +863,7 @@ export function useOpenSeaCollectionNfts(
         })
         return next
       })
-      setHasMore(Boolean(page.next))
+      setHasMore(Boolean(page.next) && seenIds.current.size < hardCap)
       cacheOpenSeaNfts(mapped)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Load more failed')
@@ -904,89 +872,17 @@ export function useOpenSeaCollectionNfts(
     }
   }, [enabled, slug, collectionId, loadingMore, listedCount, persist])
 
-  const loadAll = useCallback(
-    async (maxItems = 50_000) => {
-      if (!enabled || !slug || !collectionId) return
-      setLoadingMore(true)
-      try {
-        if (listingsRef.current.length === 0) {
-          const listings = await fetchAllBestListings(slug, {
-            maxPages: 80,
-            pageSize: 200,
-          })
-          if (listings.length) {
-            listingsRef.current = listings
-            pricesRef.current = new Map(
-              listings.map((L) => [L.tokenId, L.priceEth])
-            )
-            setListedCount(listings.length)
-          }
-        }
-
-        let cursor: string | null = nextRef.current
-        let guard = 0
-        while (seenIds.current.size < maxItems && guard < 200) {
-          guard++
-          const page = await fetchOpenSeaCollectionNftsPage(slug, {
-            limit: 50,
-            next: cursor,
-          })
-          const mapped: Nft[] = []
-          for (const raw of page.nfts) {
-            const n = mapOpenSeaNftToNft(raw, collectionId, pricesRef.current)
-            if (!n || seenIds.current.has(n.id)) continue
-            seenIds.current.add(n.id)
-            mapped.push(n)
-          }
-          cursor = page.next
-          nextRef.current = page.next
-          if (mapped.length) {
-            setNfts((prev) => {
-              const map = new Map(prev.map((x) => [x.id, x]))
-              for (const n of applyPrices(mapped, pricesRef.current)) {
-                const existing = map.get(n.id)
-                if (existing?.listed) {
-                  map.set(n.id, {
-                    ...n,
-                    listed: true,
-                    price: existing.price ?? n.price,
-                    image:
-                      existing.image && !existing.image.includes('dicebear')
-                        ? existing.image
-                        : n.image,
-                  })
-                } else {
-                  map.set(n.id, n)
-                }
-              }
-              const next = Array.from(map.values()).sort((a, b) => {
-                if (a.listed && !b.listed) return -1
-                if (!a.listed && b.listed) return 1
-                return (a.price ?? 1e9) - (b.price ?? 1e9)
-              })
-              setTotalLoaded(next.length)
-              void persist({
-                slug,
-                collectionId,
-                nfts: next,
-                listedCount,
-              })
-              return next
-            })
-            cacheOpenSeaNfts(mapped)
-          }
-          if (!page.next) break
-          await new Promise((r) => setTimeout(r, 80))
-        }
-        setHasMore(Boolean(nextRef.current))
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Load all failed')
-      } finally {
-        setLoadingMore(false)
-      }
-    },
-    [enabled, slug, collectionId, listedCount, persist]
-  )
+  /** A few extra pages only — never dump tens of thousands into memory. */
+  const loadAll = useCallback(async () => {
+    const cap = collectionNftsHardCap()
+    let guard = 0
+    while (guard < 4 && seenIds.current.size < cap) {
+      guard++
+      const before = seenIds.current.size
+      await loadMore()
+      if (seenIds.current.size === before) break
+    }
+  }, [loadMore])
 
   /** Replace catalog after progressive image enrich (scroll). */
   const replaceNfts = useCallback(

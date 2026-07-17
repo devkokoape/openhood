@@ -148,11 +148,32 @@ export async function fetchIndexerCollection(
 export async function fetchIndexerCollections(opts?: {
   limit?: number
 }): Promise<IndexerCollectionPayload[] | null> {
-  const limit = opts?.limit ?? 100
+  const limit = opts?.limit ?? 80
   const data = await getJson<{ collections?: IndexerCollectionPayload[] }>(
     `/v1/collections?limit=${limit}`
   )
   return data?.collections ?? null
+}
+
+/** Thin home feed — one request for Discover (OpenSea/ME style) */
+export interface HomeFeedPayload {
+  generatedAt: string
+  stats: {
+    collections: number
+    listedTotal: number
+    volume24h: number
+    verified: number
+  }
+  collections: IndexerCollectionPayload[]
+  trending?: IndexerCollectionPayload[]
+  featured?: IndexerCollectionPayload[]
+  activity?: Activity[]
+}
+
+export async function fetchHomeFeed(
+  limit = 36
+): Promise<HomeFeedPayload | null> {
+  return getJson<HomeFeedPayload>(`/v1/home?limit=${limit}`)
 }
 
 /** Full admin dashboard: visits, geo, users, data collection, server */

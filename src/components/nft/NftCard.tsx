@@ -57,7 +57,7 @@ export function NftCard({
           src={imgSrc}
           alt={nft.name}
           fallbackSeed={nft.id}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 content-visibility-auto"
         />
 
         {/* Status badges */}

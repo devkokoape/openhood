@@ -1137,7 +1137,7 @@ export function CollectionPage() {
                           {openSeaNfts.enriching && ' · loading artwork…'}
                         </p>
                         <div className="flex flex-wrap justify-center gap-2">
-                          {(openSeaNfts.hasMore || listedCount > 0) && (
+                          {openSeaNfts.hasMore && (
                             <Button
                               size="md"
                               variant="secondary"
@@ -1146,19 +1146,21 @@ export function CollectionPage() {
                             >
                               {openSeaNfts.loadingMore
                                 ? 'Loading…'
-                                : 'Load unlisted items'}
+                                : 'Load more'}
                             </Button>
                           )}
-                          <Button
-                            size="md"
-                            variant="outline"
-                            disabled={openSeaNfts.loadingMore}
-                            onClick={() => void openSeaNfts.loadAll()}
-                          >
-                            {openSeaNfts.loadingMore
-                              ? 'Loading all…'
-                              : 'Load full catalog'}
-                          </Button>
+                          {openSeaNfts.hasMore && (
+                            <Button
+                              size="md"
+                              variant="outline"
+                              disabled={openSeaNfts.loadingMore}
+                              onClick={() => void openSeaNfts.loadAll()}
+                            >
+                              {openSeaNfts.loadingMore
+                                ? 'Loading…'
+                                : 'Load more pages'}
+                            </Button>
+                          )}
                         </div>
                         {openSeaNfts.error && (
                           <p className="text-xs text-orange-500">{openSeaNfts.error}</p>

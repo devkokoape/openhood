@@ -23,7 +23,8 @@ export function preferLiteMode(): boolean {
 }
 
 export function maxDiscoverCollections(): number {
-  return preferLiteMode() ? 48 : 100
+  // OpenSea/ME home never mounts 1000 collections client-side
+  return preferLiteMode() ? 36 : 60
 }
 
 export function maxStatsBatch(): number {
@@ -39,11 +40,13 @@ export function eventsPollMs(): number {
 }
 
 export function collectionNftsFirstPage(): number {
-  return preferLiteMode() ? 48 : 100
+  // One viewport of cards (ME/OpenSea first paint)
+  return preferLiteMode() ? 36 : 48
 }
 
 export function collectionNftsHardCap(): number {
-  return preferLiteMode() ? 120 : 280
+  // Even desktop shouldn't hold thousands of NFT objects
+  return preferLiteMode() ? 96 : 160
 }
 
 export function enrichWaveSize(): number {
