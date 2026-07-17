@@ -19,22 +19,28 @@ export async function openSeaGet(path, attempt = 0) {
   const url = `${OPENSEA_HOST}${path.startsWith('/') ? path : `/${path}`}`
   try {
     const res = await fetch(url, { headers: headers() })
-    if ((res.status === 429 || res.status >= 500) && attempt < 5) {
-      // Back off harder on rate limits so we don't truncate listing books
-      await sleep(600 * (attempt + 1) + (res.status === 429 ? 1500 : 0))
+    if ((res.status === 429 || res.status >= 500) && attempt < 8) {
+      // Exponential backoff on 429 — OpenSea rate limits kill enrich otherwise
+      const retryAfter = Number(res.headers.get('retry-after') || 0)
+      const wait =
+        retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(30_000, 800 * 2 ** attempt + (res.status === 429 ? 2000 : 0))
+      await sleep(wait)
       return openSeaGet(path, attempt + 1)
     }
     if (res.status === 404) return null
     if (!res.ok) {
       const err = new Error(`OpenSea ${res.status} ${path}`)
       err.status = res.status
+      err.rateLimited = res.status === 429
       throw err
     }
     return await res.json()
   } catch (e) {
     if (e?.status) throw e // propagate 4xx/5xx after retries
-    if (attempt < 2) {
-      await sleep(400)
+    if (attempt < 3) {
+      await sleep(500 * (attempt + 1))
       return openSeaGet(path, attempt + 1)
     }
     throw e

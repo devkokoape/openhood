@@ -21,6 +21,7 @@ import {
   listCollections,
   listCollectionSummaries,
   getMeta,
+  setMeta,
   saveToDisk,
   storageInfo,
 } from './store.js'
@@ -553,14 +554,34 @@ const server = http.createServer(async (req, res) => {
       const content = dbContentStatus()
       const meta = getMeta()
       const q = queueDepth()
-      const startQ = Number(meta.lastDownloadQueued || 0)
-      const doneJobs = startQ > 0 ? Math.max(0, startQ - q) : 0
+
+      // Monotonic progress: done only increases when queue shrinks.
+      // If new jobs are added (re-queue / enrich), remaining goes up but "done" never drops.
+      let done = Number(meta.progressDone || 0)
+      const prevQ =
+        meta.progressLastQueue != null
+          ? Number(meta.progressLastQueue)
+          : Number(meta.progressStartQueued || meta.lastDownloadQueued || q)
+      if (Number.isFinite(prevQ) && q < prevQ) {
+        done += prevQ - q
+      }
+      // Persist progress (best-effort; concurrent GETs are fine)
+      setMeta({
+        progressDone: done,
+        progressLastQueue: q,
+      })
+      const remaining = q
+      const total = Math.max(
+        Number(meta.progressStartQueued || meta.lastDownloadQueued || 0),
+        done + remaining
+      )
       const progressPct =
-        startQ > 0
-          ? Math.min(100, Math.round((doneJobs / startQ) * 100))
-          : q > 0
-            ? 0
-            : 100
+        remaining === 0 && done === 0
+          ? 100
+          : total > 0
+            ? Math.min(100, Math.round((done / total) * 100))
+            : 0
+
       return json(
         res,
         200,
@@ -569,12 +590,14 @@ const server = http.createServer(async (req, res) => {
           busy: isSyncBusy(),
           queueDepth: q,
           progress: {
-            startQueued: startQ,
-            remaining: q,
-            done: doneJobs,
+            startQueued: total,
+            remaining,
+            done,
             percent: progressPct,
             mode: meta.lastDownloadMode || null,
             startedAt: meta.lastDownloadAt || null,
+            note:
+              'done only increases; queue can grow if jobs are re-queued after rate limits',
           },
           media: mediaStats(),
           nftsIndexed: meta.nftsIndexed,
@@ -585,6 +608,8 @@ const server = http.createServer(async (req, res) => {
           lastDownloadQueued: meta.lastDownloadQueued ?? null,
           lastVerifiedQueued: meta.lastVerifiedQueued ?? null,
           lastError: meta.lastError || null,
+          lastWarning: meta.lastWarning || null,
+          lastRateLimitAt: meta.lastRateLimitAt || null,
           ...content,
         },
         3

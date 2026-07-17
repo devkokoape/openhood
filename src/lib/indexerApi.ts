@@ -294,6 +294,8 @@ export interface ContentStatusPayload {
   lastDownloadQueued?: number | null
   lastVerifiedQueued?: number | null
   lastError?: string | null
+  lastWarning?: string | null
+  lastRateLimitAt?: string | null
   summary: {
     collections: number
     verified?: number

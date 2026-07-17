@@ -323,9 +323,21 @@ async function pumpQueue() {
         else await syncSlugMeta(job.slug)
       } catch (e) {
         console.error(`[queue] ${job.slug}`, e?.message || e)
-        setMeta({ lastError: `${job.slug}: ${e?.message || e}` })
+        const msg = `${job.slug}: ${e?.message || e}`
+        // 429 is expected under load — don't scare admin UI as a hard failure
+        if (e?.status === 429 || e?.rateLimited || /OpenSea 429/.test(msg)) {
+          setMeta({ lastWarning: msg, lastRateLimitAt: new Date().toISOString() })
+          // Re-queue full enrich later (back of line) so we eventually finish
+          if (job.full) {
+            enqueueSync(job.slug, { full: true, front: false })
+          }
+          await new Promise((r) => setTimeout(r, 2500))
+        } else {
+          setMeta({ lastError: msg })
+        }
       }
-      await new Promise((r) => setTimeout(r, 300))
+      // Slightly slower cadence reduces 429 storms
+      await new Promise((r) => setTimeout(r, 500))
     }
   } finally {
     queueRunning = false
@@ -463,15 +475,20 @@ export async function downloadAllContent({ mode = 'mainnet' } = {}) {
     }
   }
 
+  const qAfter = queueDepth()
   setMeta({
     lastDownloadAt: new Date().toISOString(),
     lastDownloadMode: mode,
     lastDownloadQueued: queued,
     lastVerifiedQueued: verifiedQueued,
     lastDownloadMainnetOnly: true,
+    // Progress baseline — done only goes up as queue drains
+    progressDone: 0,
+    progressLastQueue: qAfter,
+    progressStartQueued: qAfter,
   })
 
-  const q = queueDepth()
+  const q = qAfter
   const message =
     mode === 'enrich'
       ? `Mainnet enrich: ${fullQueued} art jobs (${verifiedQueued} verified first). Queue ${q}.`

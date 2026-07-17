@@ -672,12 +672,21 @@ export function dbContentStatus() {
       status = c.synced_at ? 'empty' : 'shell'
       empty++
       if (!c.synced_at) shell++
-    } else if (stubs === 0 && enrichPct >= 80) {
+    } else if (
+      listed > 0 &&
+      // Practical "ready": most art filled (OpenSea 429 means 100% is rare for large books)
+      (enrichPct >= 75 ||
+        (enrichPct >= 60 && stubs <= Math.max(5, Math.floor(listed * 0.15))) ||
+        (stubs === 0 && enrichPct >= 50))
+    ) {
       status = 'ready'
       ready++
-    } else {
+    } else if (listed > 0) {
       status = 'partial'
       partial++
+    } else {
+      status = 'empty'
+      empty++
     }
     if (listed > 0) withListings++
     if (hasImage) withImage++

@@ -727,7 +727,7 @@ export function AdminPage() {
                   </span>
                   <span className="tabular-nums text-hood">
                     {content.progress
-                      ? `${content.progress.done}/${content.progress.startQueued || '—'} done · ${content.progress.remaining} left · ${content.progress.percent}%`
+                      ? `${content.progress.done} finished · ${content.progress.remaining} left · ${content.progress.percent}%`
                       : `queue ${content.queueDepth ?? 0}`}
                     {content.busy ? ' · working' : ''}
                   </span>
@@ -744,12 +744,22 @@ export function AdminPage() {
                   />
                 </div>
                 <p className="text-[11px] text-ink-3">
-                  Jobs finish one-by-one on Fly (OpenSea rate limits apply). Art enrich % and
-                  “with listings” rise as the queue drains.
-                  {content.lastError ? (
-                    <span className="block mt-1 text-[var(--color-danger)]">
-                      Last error: {content.lastError.slice(0, 160)}
-                      {content.lastError.length > 160 ? '…' : ''}
+                  <strong className="text-ink">Finished</strong> only goes up.
+                  <strong className="text-ink"> Left</strong> is the live queue (can go up briefly
+                  if OpenSea rate-limits and jobs re-queue). Large collections need many API calls
+                  — 429 means “slow down”, not “broken”.
+                  {content.lastWarning || content.lastError ? (
+                    <span
+                      className={clsx(
+                        'block mt-1',
+                        content.lastWarning
+                          ? 'text-ink-2'
+                          : 'text-[var(--color-danger)]'
+                      )}
+                    >
+                      {content.lastWarning
+                        ? `Rate limit (normal): ${content.lastWarning.slice(0, 140)}${content.lastWarning.length > 140 ? '…' : ''}`
+                        : `Last error: ${String(content.lastError).slice(0, 160)}`}
                     </span>
                   ) : null}
                 </p>
