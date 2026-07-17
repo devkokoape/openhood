@@ -310,10 +310,49 @@ export async function fillListedFromCatalog(slug, nfts, collectionId, { maxPages
   return Array.from(byToken.values()).sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
 }
 
-export async function enrichImages(nfts, listings, { chain = 'robinhood', concurrency = 8, limit = 80 } = {}) {
-  const contract = listings.find((L) => L.contract)?.contract
-  if (!contract) return nfts
-  const targets = listings.slice(0, limit)
+/**
+ * Per-token OpenSea fetch for listed IDs. Reliable for sparse listings
+ * (catalog paging only helps when most of supply is listed).
+ */
+export async function enrichImages(
+  nfts,
+  listings,
+  { chain = 'robinhood', concurrency = 6, limit = 500, onlyMissing = true } = {}
+) {
+  const contract =
+    listings.find((L) => L.contract)?.contract ||
+    nfts.find((n) => n.contract)?.contract
+  // Build targets from listings OR missing nfts
+  let targets = listings?.length
+    ? listings.map((L) => ({
+        tokenId: String(L.tokenId),
+        contract: L.contract || contract,
+        chain: L.chain || chain,
+      }))
+    : nfts.map((n) => ({
+        tokenId: String(n.tokenId),
+        contract,
+        chain,
+      }))
+
+  if (onlyMissing) {
+    const need = new Set(
+      nfts
+        .filter(
+          (n) =>
+            !n.image ||
+            String(n.image).includes('dicebear') ||
+            /image_type_(logo|hero)/i.test(n.image)
+        )
+        .map((n) => String(n.tokenId))
+    )
+    targets = targets.filter((t) => need.has(String(t.tokenId)))
+  }
+
+  if (!contract && !targets.some((t) => t.contract)) return nfts
+  targets = targets.slice(0, limit)
+  if (!targets.length) return nfts
+
   let i = 0
   const patches = new Map()
 
@@ -321,8 +360,10 @@ export async function enrichImages(nfts, listings, { chain = 'robinhood', concur
     while (i < targets.length) {
       const idx = i++
       const L = targets[idx]
+      const c = L.contract || contract
+      if (!c) continue
       try {
-        const nft = await fetchNft(L.chain || chain, L.contract || contract, L.tokenId)
+        const nft = await fetchNft(L.chain || chain, c, L.tokenId)
         if (!nft) continue
         patches.set(String(L.tokenId), {
           name: nft.name || undefined,
@@ -330,12 +371,15 @@ export async function enrichImages(nfts, listings, { chain = 'robinhood', concur
           owner: nft.owners?.[0]?.address?.toLowerCase() || undefined,
           traits: (nft.traits || [])
             .filter((t) => t.trait_type != null && t.value != null)
-            .map((t) => ({ trait_type: String(t.trait_type), value: String(t.value) })),
+            .map((t) => ({
+              trait_type: String(t.trait_type),
+              value: String(t.value),
+            })),
         })
       } catch {
         /* skip */
       }
-      await sleep(40)
+      await sleep(30)
     }
   }
 

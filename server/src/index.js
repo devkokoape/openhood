@@ -27,9 +27,11 @@ import {
 import {
   defaultSlugs,
   enrichPass,
+  enqueueSync,
   isSyncBusy,
+  queueDepth,
   syncOnce,
-  syncSlug,
+  syncSlugMeta,
   warmPriority,
 } from './sync.js'
 import { fetchNft } from './opensea.js'
@@ -162,6 +164,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {
         ...getMeta(),
         busy: isSyncBusy(),
+        queueDepth: queueDepth(),
         slugs: defaultSlugs(),
         hasOpenSeaKey: Boolean(
           (process.env.OPENSEA_API_KEY || process.env.VITE_OPENSEA_API_KEY || '').trim()
@@ -327,17 +330,57 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { nft: restNft, slug }, 30)
       }
 
+      // Fast path: always serve SQLite if we have data (no OpenSea wait)
       let row = getCollection(slug)
-      if (!row?.nfts?.length) {
+      if (row?.nfts?.length) {
+        // Keep improving in background if stubs remain
+        const stubs = (row.nfts || []).filter(
+          (n) =>
+            !n.image ||
+            String(n.image).includes('dicebear') ||
+            /image_type_(logo|hero)/i.test(n.image)
+        ).length
+        if (stubs > 10) enqueueSync(slug, { full: true })
+      } else {
+        // Not indexed yet: try quick meta sync with hard timeout, else 202
         try {
-          row = await syncSlug(slug)
+          row = await Promise.race([
+            syncSlugMeta(slug),
+            new Promise((_, rej) =>
+              setTimeout(() => rej(new Error('meta timeout')), 12_000)
+            ),
+          ])
+          enqueueSync(slug, { full: true }) // art fills in background
         } catch (e) {
-          return json(res, 404, {
-            error: 'collection not indexed',
-            detail: e?.message || String(e),
-            slug,
-          })
+          enqueueSync(slug, { full: true, front: true })
+          return json(
+            res,
+            202,
+            {
+              indexing: true,
+              slug,
+              error: e?.message || 'indexing',
+              message:
+                'Collection is being indexed. Poll this endpoint again in a few seconds.',
+              nfts: [],
+              activities: [],
+              offers: [],
+              listedCount: 0,
+            },
+            0
+          )
         }
+      }
+
+      if (!row?.nfts?.length) {
+        return json(res, 202, {
+          indexing: true,
+          slug,
+          nfts: [],
+          listedCount: 0,
+          activities: [],
+          offers: [],
+        })
       }
 
       const lite = url.searchParams.get('lite') === '1'
@@ -347,11 +390,12 @@ const server = http.createServer(async (req, res) => {
           200,
           {
             ...summarize(row),
+            indexPhase: row.indexPhase,
             nfts: (row.nfts || []).slice(0, 200),
             activities: (row.activities || []).slice(0, 40),
             offers: (row.offers || []).slice(0, 30),
           },
-          5
+          3
         )
       }
 
@@ -361,12 +405,13 @@ const server = http.createServer(async (req, res) => {
         {
           ...summarize(row),
           description: row.description,
+          indexPhase: row.indexPhase,
           nfts: row.nfts || [],
           activities: row.activities || [],
           offers: row.offers || [],
           prices: row.prices || [],
         },
-        5
+        3
       )
     }
 

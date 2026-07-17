@@ -1,5 +1,9 @@
 /**
- * Background sync: OpenSea → store
+ * Background sync: OpenSea → SQLite
+ * Strategy:
+ *  1) Meta first (listings / offers / events / floor) — seconds
+ *  2) Per-token metadata for listed IDs (reliable; catalog paging misses sparse listings)
+ *  3) Single serial queue — no concurrent OpenSea storms
  */
 import {
   enrichImages,
@@ -8,7 +12,6 @@ import {
   fetchCollectionEvents,
   fetchCollectionOffers,
   fetchCollectionStats,
-  fillListedFromCatalog,
   listingsToNfts,
   mapEvents,
   mapOffers,
@@ -24,36 +27,156 @@ import {
 } from './store.js'
 import { fetchNft } from './opensea.js'
 
-/** Priority slugs (high volume / demo) — always first. */
+/** Built-in high-priority + full Robinhood snapshot when INDEX_SLUGS unset */
 export const PRIORITY_SLUGS = [
   'gremlin-cartel',
   'onchainhoodies-',
+  'py0py0py0py0',
+  'robinhood-punks',
+  'robbin-hood-babies',
+  'pixelhoodclan',
+  'hoodini',
+  'chogies-robin-hood',
+  'therobinhood',
+  'robinhood-kitties',
+  'hoodiliosnft',
+  'degen-hood',
+  'rh-ape-cartel',
+  'robinalpha',
+  'eternals-robinhood',
+  'ascii-cats-robinhood',
+  'robinhood-stonk',
+  '8skullz',
+  'cashcat-nft',
+  'robinhood-bugs',
+  'much-wow-nft',
+  'opepenhood',
+  'quack-ventures',
+  'robinzuki',
+  'ofh00d',
+  'doomps',
+  'zerebro-rhood-agent',
+  '4663-hoods',
+  'robinhoodmigos',
+]
+
+const SNAPSHOT_SLUGS = [
+  'gremlin-cartel',
+  'onchainhoodies-',
+  'py0py0py0py0',
   'robinhood-punks',
   'robbin-hood-babies',
   'pixelhoodclan',
   'hoodini',
   'robinhood-kitties',
-  'py0py0py0py0',
+  'hoodiliosnft',
+  'degen-hood',
+  'rh-ape-cartel',
+  'robinalpha',
+  'eternals-robinhood',
+  'robinhood-apes-nft',
+  'ascii-cats-robinhood',
+  'robinhood-stonk',
+  '8skullz',
+  'robbob',
+  'mozestreetart',
+  'rcminerpack',
+  'cashcat-nft',
+  'rcopy-genesis',
+  'robinhood-bugs',
+  'robinhood-dinos',
+  'skull-hood-pfp',
+  'much-wow-nft',
+  'gravelinclub',
+  'non-playable-hoodies',
+  'robin-pass',
+  'sherwoodghosts',
+  'lost-echoes-rc',
+  'robin-frogs',
+  'opepenhood',
+  'robinhoodchungos',
+  'robindroids-nft',
+  'quack-ventures',
+  'robinzuki',
+  'aurafy',
+  'chogies-robin-hood',
+  'ofh00d',
+  'therobinhood',
+  'robin-thugz',
+  'robinhood-rocks-onchain',
+  'robinhood-pengs',
+  'doomps',
+  'robinhood-mews',
+  'nutsycollective',
+  'kibo-rh',
+  'zerebro-rhood-agent',
+  '4663-hoods',
+  'robinhoodmigos',
 ]
 
-/** Extra Robinhood slugs from snapshot catalog (can override via env). */
 export function defaultSlugs() {
   const env = (process.env.INDEX_SLUGS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
   if (env.length) return [...new Set([...PRIORITY_SLUGS, ...env])]
-  return [...PRIORITY_SLUGS]
+  return [...new Set([...PRIORITY_SLUGS, ...SNAPSHOT_SLUGS])]
 }
 
+/** Serial job queue */
+const queue = []
+let queueRunning = false
 let busy = false
 let cursor = 0
 
-export async function syncSlug(slug) {
-  const t0 = Date.now()
-  console.log(`[sync] start ${slug}`)
+export function enqueueSync(slug, { full = true, front = false } = {}) {
+  if (!slug) return
+  // de-dupe
+  const exists = queue.find((j) => j.slug === slug && j.full === full)
+  if (exists) return
+  const job = { slug, full }
+  if (front) queue.unshift(job)
+  else queue.push(job)
+  void pumpQueue()
+}
 
+async function pumpQueue() {
+  if (queueRunning) return
+  queueRunning = true
+  try {
+    while (queue.length) {
+      const job = queue.shift()
+      try {
+        if (job.full) await syncSlug(job.slug)
+        else await syncSlugMeta(job.slug)
+      } catch (e) {
+        console.error(`[queue] ${job.slug}`, e?.message || e)
+        setMeta({ lastError: `${job.slug}: ${e?.message || e}` })
+      }
+      await new Promise((r) => setTimeout(r, 300))
+    }
+  } finally {
+    queueRunning = false
+  }
+}
+
+export function isSyncBusy() {
+  return busy || queueRunning || queue.length > 0
+}
+
+export function queueDepth() {
+  return queue.length
+}
+
+/**
+ * Fast path: listings + offers + events + stats only (~2–5s).
+ * Saves stubs so clients show prices immediately.
+ */
+export async function syncSlugMeta(slug) {
+  const t0 = Date.now()
+  console.log(`[sync:meta] start ${slug}`)
   const collectionId = `os-${slug}`
+
   const [listings, events, offerRows, stats, colMeta] = await Promise.all([
     fetchAllBestListings(slug, { maxPages: 80 }),
     fetchCollectionEvents(slug, 50),
@@ -65,7 +188,7 @@ export async function syncSlug(slug) {
   if (!listings.length) {
     const prev = getCollection(slug)
     if (prev?.nfts?.length) {
-      console.warn(`[sync] ${slug}: empty listings, keeping previous ${prev.nfts.length}`)
+      console.warn(`[sync:meta] ${slug}: empty listings, keep previous`)
       return prev
     }
     throw new Error(`No listings for ${slug}`)
@@ -81,14 +204,36 @@ export async function syncSlug(slug) {
   const owners = stats?.total?.num_owners ?? 0
   const items = colMeta?.total_supply || colMeta?.unique_item_count || 0
 
-  // —— Phase A (fast): listings + offers + events only (no image wait) ——
+  // Merge with previous enriched art when re-syncing meta
+  const prev = getCollection(slug)
   let nfts = listingsToNfts(listings, collectionId, { name })
+  if (prev?.nfts?.length) {
+    const byTok = new Map(prev.nfts.map((n) => [String(n.tokenId), n]))
+    nfts = nfts.map((n) => {
+      const old = byTok.get(String(n.tokenId))
+      if (!old) return n
+      const oldImg = old.image
+      const keepImg =
+        oldImg &&
+        !String(oldImg).includes('dicebear') &&
+        !/image_type_(logo|hero)/i.test(oldImg)
+      return {
+        ...n,
+        name: old.name && !String(old.name).startsWith('#') ? old.name : n.name,
+        image: keepImg ? oldImg : n.image,
+        owner: old.owner && old.owner !== 'unknown' ? old.owner : n.owner,
+        traits: (old.traits?.length || 0) > 2 ? old.traits : n.traits,
+        rarityRank: old.rarityRank ?? n.rarityRank,
+      }
+    })
+  }
+
   const activities = mapEvents(slug, collectionId, events)
   const offers = mapOffers(collectionId, offerRows)
   const listedCount = listings.length
   const listedPct = items > 0 ? +((listedCount / items) * 100).toFixed(1) : 0
 
-  const baseRow = {
+  const row = {
     slug,
     collectionId,
     name,
@@ -113,141 +258,165 @@ export async function syncSlug(slug) {
     syncMs: Date.now() - t0,
     indexPhase: 'meta',
   }
-  // Persist meta immediately so clients can show listed/offer state without images
-  putCollection(slug, baseRow)
-  console.log(
-    `[sync] meta ${slug}: ${listedCount} listed, ${offers.length} offers, ${activities.length} events in ${Date.now() - t0}ms`
-  )
-
-  // —— Phase B: item identity (name/image URL/traits) via catalog pages ——
-  try {
-    nfts = await fillListedFromCatalog(slug, nfts, collectionId, {
-      maxPages: Number(process.env.CATALOG_FILL_PAGES || 120),
-    })
-  } catch (e) {
-    console.warn(`[sync] catalog-fill ${slug}`, e?.message || e)
-  }
-  const enrichLimit = Number(process.env.ENRICH_LIMIT || 80)
-  try {
-    nfts = await enrichImages(nfts, listings, {
-      chain: colMeta?.contracts?.[0]?.chain || 'robinhood',
-      concurrency: Number(process.env.ENRICH_CONCURRENCY || 8),
-      limit: enrichLimit,
-    })
-  } catch (e) {
-    console.warn(`[sync] enrich ${slug}`, e?.message || e)
-  }
-
-  const row = {
-    ...baseRow,
-    nfts,
-    syncMs: Date.now() - t0,
-    indexPhase: 'items',
-  }
   putCollection(slug, row)
   console.log(
-    `[sync] done ${slug}: ${listedCount} listed, items filled, ${offers.length} offers in ${row.syncMs}ms`
+    `[sync:meta] ${slug}: ${listedCount} listed, ${offers.length} offers in ${row.syncMs}ms`
   )
   return row
 }
 
-export async function syncOnce(slugs = defaultSlugs()) {
-  if (busy) {
-    console.log('[sync] already running, skip')
-    return getMeta()
+/**
+ * Fill names/images for listed tokens by direct NFT API (reliable).
+ * Catalog paging only works when most of supply is listed (e.g. gremlin).
+ */
+export async function syncSlugItems(slug) {
+  const t0 = Date.now()
+  let row = getCollection(slug)
+  if (!row?.nfts?.length) {
+    row = await syncSlugMeta(slug)
   }
+  const contract = row.contractAddress
+  const chain = row.chain || 'robinhood'
+  if (!contract) return row
+
+  const need = row.nfts.filter(
+    (n) =>
+      !n.image ||
+      String(n.image).includes('dicebear') ||
+      /image_type_(logo|hero)/i.test(n.image)
+  )
+  if (!need.length) {
+    console.log(`[sync:items] ${slug}: already complete (${row.nfts.length})`)
+    return row
+  }
+
+  console.log(`[sync:items] ${slug}: enriching ${need.length}/${row.nfts.length}`)
+  const listings = need.map((n) => ({
+    tokenId: String(n.tokenId),
+    contract,
+    chain,
+  }))
+  // Process ALL needed tokens (concurrency limited)
+  let nfts = await enrichImages(row.nfts, listings, {
+    chain,
+    concurrency: Number(process.env.ENRICH_CONCURRENCY || 6),
+    limit: need.length,
+    onlyMissing: true,
+  })
+
+  const next = {
+    ...row,
+    nfts,
+    syncMs: (row.syncMs || 0) + (Date.now() - t0),
+    indexPhase: 'items',
+    syncedAt: new Date().toISOString(),
+  }
+  putCollection(slug, next)
+  const filled = nfts.filter(
+    (n) => n.image && !String(n.image).includes('dicebear')
+  ).length
+  console.log(
+    `[sync:items] ${slug}: ${filled}/${nfts.length} have art in ${Date.now() - t0}ms`
+  )
+  return next
+}
+
+/** Full sync: meta then items */
+export async function syncSlug(slug) {
   busy = true
-  setMeta({ lastError: null })
   try {
-    // Round-robin a few each cycle so we stay fresh without hammering
-    const batchSize = Number(process.env.SYNC_BATCH || 3)
-    const start = cursor % slugs.length
-    const batch = []
-    for (let i = 0; i < Math.min(batchSize, slugs.length); i++) {
-      batch.push(slugs[(start + i) % slugs.length])
-    }
-    cursor = (start + batch.length) % slugs.length
-
-    for (const slug of batch) {
-      try {
-        await syncSlug(slug)
-      } catch (e) {
-        console.error(`[sync] fail ${slug}`, e?.message || e)
-        setMeta({ lastError: `${slug}: ${e?.message || e}` })
-      }
-      await new Promise((r) => setTimeout(r, 400))
-    }
-
-    setMeta({
-      lastFullSyncAt: new Date().toISOString(),
-      syncCount: (getMeta().syncCount || 0) + 1,
-      slugQueue: slugs,
-    })
+    await syncSlugMeta(slug)
+    return await syncSlugItems(slug)
   } finally {
     busy = false
   }
+}
+
+export async function syncOnce(slugs = defaultSlugs()) {
+  // Prefer queue so we don't stampede
+  const batchSize = Number(process.env.SYNC_BATCH || 2)
+  const start = cursor % slugs.length
+  for (let i = 0; i < Math.min(batchSize, slugs.length); i++) {
+    enqueueSync(slugs[(start + i) % slugs.length], { full: true })
+  }
+  cursor = (start + batchSize) % slugs.length
+  setMeta({
+    lastFullSyncAt: new Date().toISOString(),
+    syncCount: (getMeta().syncCount || 0) + 1,
+    slugQueue: slugs,
+  })
   return getMeta()
 }
 
+/** Boot: meta-first for many collections (fast), then full items in queue */
 export async function warmPriority() {
-  for (const slug of PRIORITY_SLUGS.slice(0, 4)) {
+  const slugs = defaultSlugs()
+  // Meta-only first pass (quick prices for everyone)
+  const metaN = Number(process.env.WARM_META_N || 20)
+  for (const slug of slugs.slice(0, metaN)) {
     try {
-      await syncSlug(slug)
+      await syncSlugMeta(slug)
     } catch (e) {
-      console.error(`[warm] ${slug}`, e?.message || e)
+      console.error(`[warm:meta] ${slug}`, e?.message || e)
     }
-    await new Promise((r) => setTimeout(r, 500))
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  // Then full item enrich for top collections
+  for (const slug of PRIORITY_SLUGS.slice(0, 12)) {
+    enqueueSync(slug, { full: true })
   }
   setMeta({ lastFullSyncAt: new Date().toISOString() })
 }
 
-export function isSyncBusy() {
-  return busy
-}
-
 /**
- * Continuously fill missing NFT images/names for stored collections.
- * Runs between listing syncs so deep-scroll items get real art.
+ * Background: keep filling unenriched tokens across all collections.
  */
 let enrichBusy = false
 export async function enrichPass() {
-  if (enrichBusy || busy) return
+  if (enrichBusy || busy || queueRunning) return
   enrichBusy = true
   try {
     const cols = listCollections()
     for (const c of cols) {
-      const missing = unenrichedTokens(c.slug, Number(process.env.ENRICH_BATCH || 40))
+      const missing = unenrichedTokens(c.slug, Number(process.env.ENRICH_BATCH || 60))
       if (!missing.length) continue
-      const contract = c.contractAddress || missing[0]?.contract
+      const contract = c.contractAddress
       if (!contract) continue
-      console.log(`[enrich] ${c.slug}: ${missing.length} items`)
+      console.log(`[enrich] ${c.slug}: ${missing.length} stubs`)
       const patches = new Map()
-      for (const m of missing) {
-        try {
-          const raw = await fetchNft(m.chain || 'robinhood', m.contract || contract, m.tokenId)
-          if (!raw) continue
-          patches.set(String(m.tokenId), {
-            name: raw.name || undefined,
-            image: raw.image_url || raw.display_image_url || undefined,
-            owner: raw.owners?.[0]?.address?.toLowerCase() || undefined,
-            traits: (raw.traits || [])
-              .filter((t) => t.trait_type != null && t.value != null)
-              .map((t) => ({
-                trait_type: String(t.trait_type),
-                value: String(t.value),
-              })),
-          })
-        } catch {
-          /* skip */
+      let i = 0
+      const conc = Number(process.env.ENRICH_CONCURRENCY || 6)
+      async function worker() {
+        while (i < missing.length) {
+          const m = missing[i++]
+          try {
+            const raw = await fetchNft(m.chain || 'robinhood', contract, m.tokenId)
+            if (!raw) continue
+            patches.set(String(m.tokenId), {
+              name: raw.name || undefined,
+              image: raw.image_url || raw.display_image_url || undefined,
+              owner: raw.owners?.[0]?.address?.toLowerCase() || undefined,
+              traits: (raw.traits || [])
+                .filter((t) => t.trait_type != null && t.value != null)
+                .map((t) => ({
+                  trait_type: String(t.trait_type),
+                  value: String(t.value),
+                })),
+            })
+          } catch {
+            /* skip */
+          }
+          await new Promise((r) => setTimeout(r, 35))
         }
-        await new Promise((r) => setTimeout(r, 50))
       }
+      await Promise.all(
+        Array.from({ length: Math.min(conc, missing.length) }, () => worker())
+      )
       if (patches.size) {
         patchCollectionNfts(c.slug, patches)
         console.log(`[enrich] ${c.slug}: patched ${patches.size}`)
       }
-      // one collection per pass to stay polite to OpenSea
-      break
+      break // one collection per pass
     }
   } finally {
     enrichBusy = false

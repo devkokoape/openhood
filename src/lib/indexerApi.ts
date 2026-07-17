@@ -70,9 +70,25 @@ export async function fetchIndexerStatus(): Promise<{
 export async function fetchIndexerCollection(
   slug: string,
   opts?: { lite?: boolean }
-): Promise<IndexerCollectionPayload | null> {
+): Promise<(IndexerCollectionPayload & { indexing?: boolean }) | null> {
+  const base = baseUrl()
+  if (!base) return null
   const q = opts?.lite ? '?lite=1' : ''
-  return getJson(`/v1/collections/${encodeURIComponent(slug)}${q}`)
+  try {
+    const res = await fetch(
+      `${base}/v1/collections/${encodeURIComponent(slug)}${q}`,
+      { headers: { accept: 'application/json' }, cache: 'no-store' }
+    )
+    // 202 = still indexing on Fly — return body so client can poll
+    if (res.status === 202 || res.ok) {
+      return (await res.json()) as IndexerCollectionPayload & {
+        indexing?: boolean
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 export async function fetchIndexerCollections(): Promise<

@@ -13,9 +13,12 @@ primary_region = "iad"
 [env]
   PORT = "8080"
   DATA_DIR = "/data"
-  SYNC_INTERVAL_MS = "45000"
-  SYNC_BATCH = "3"
-  ENRICH_LIMIT = "60"
+  SYNC_INTERVAL_MS = "30000"
+  SYNC_BATCH = "2"
+  ENRICH_LIMIT = "500"
+  ENRICH_BATCH = "80"
+  ENRICH_CONCURRENCY = "6"
+  WARM_META_N = "25"
   CORS_ORIGIN = "*"
 
 [http_service]

@@ -22,6 +22,7 @@ import {
   nftsFromListings,
   type ParsedListing,
 } from '../lib/opensea'
+// fillListedNftMetadata kept for non-indexer soft cache path
 import {
   getCollectionStore,
   getCollectionStoreSync,
@@ -249,44 +250,89 @@ export function useOpenSeaCollectionNfts(
               offers: offs,
             })
 
-            // If server returned stubs (placeholders), fill real art via collection NFT pages
-            const missing = nftsMapped.filter((n) =>
-              nftNeedsMetadata(n, fallbackImage)
-            ).length
-            if (missing > 0 && !cancelled && gen === abortGen.current) {
-              setEnriching(true)
-              nftsMapped = await fillListedNftMetadata(slugName, colId, nftsMapped, {
-                maxPages: 120,
-                collectionImage: fallbackImage,
-                signal,
-                onProgress: (partial) => {
-                  if (cancelled || gen !== abortGen.current) return
-                  setNfts(partial)
-                  setTotalLoaded(partial.length)
-                  cacheOpenSeaNfts(partial)
-                },
-              })
-              if (!cancelled && gen === abortGen.current) {
-                setNfts(nftsMapped)
-                cacheOpenSeaNfts(nftsMapped)
-                await persist({
-                  slug: slugName,
-                  collectionId: colId,
-                  nfts: nftsMapped,
-                  listedCount: remote.listedCount || nftsMapped.length,
-                  activities: acts,
-                  offers: offs,
-                })
-                setEnriching(false)
-              }
-            }
-
+            // Paint immediately from Fly (prices/listed/offers).
+            // Do NOT crawl OpenSea catalog in the browser — that is what made
+            // non-Gremlin collections feel broken and slow. Fly fills art in background.
             if (!cancelled && gen === abortGen.current) {
               setLoading(false)
               setRefreshing(false)
               setReady(true)
+              setEnriching(
+                nftsMapped.some((n) => nftNeedsMetadata(n, fallbackImage))
+              )
+            }
+
+            // Light poll: pick up server-side item enrich without OpenSea from browser
+            const pollMissing = nftsMapped.filter((n) =>
+              nftNeedsMetadata(n, fallbackImage)
+            ).length
+            if (pollMissing > 5 && !cancelled) {
+              const poll = async () => {
+                for (let i = 0; i < 8; i++) {
+                  if (cancelled || gen !== abortGen.current) return
+                  await new Promise((r) => setTimeout(r, 4000))
+                  const again = await fetchIndexerCollection(slugName)
+                  if (!again?.nfts?.length) continue
+                  const mapped = again.nfts.map((n) => ({
+                    ...n,
+                    collectionId: colId,
+                    id: `${colId}-os-${n.tokenId}`,
+                  }))
+                  setNfts(mapped)
+                  cacheOpenSeaNfts(mapped)
+                  await persist({
+                    slug: slugName,
+                    collectionId: colId,
+                    nfts: mapped,
+                    listedCount: again.listedCount || mapped.length,
+                    activities: acts,
+                    offers: offs,
+                  })
+                  const still = mapped.filter((n) =>
+                    nftNeedsMetadata(n, fallbackImage)
+                  ).length
+                  if (still < 5) {
+                    setEnriching(false)
+                    return
+                  }
+                }
+                setEnriching(false)
+              }
+              void poll()
+            } else {
+              setEnriching(false)
             }
             return
+          }
+
+          // Indexer returned empty / 202 indexing — short poll, no heavy OpenSea crawl
+          if (remote?.indexing) {
+            setLoading(true)
+            for (let i = 0; i < 10 && !cancelled; i++) {
+              await new Promise((r) => setTimeout(r, 2000))
+              const again = await fetchIndexerCollection(slugName)
+              if (again?.nfts?.length) {
+                // re-enter path by recursive-like handling
+                const mapped = again.nfts.map((n) => ({
+                  ...n,
+                  collectionId: colId,
+                  id: `${colId}-os-${n.tokenId}`,
+                }))
+                setNfts(mapped)
+                setListedCount(again.listedCount || mapped.length)
+                setTotalLoaded(mapped.length)
+                setLoading(false)
+                setReady(true)
+                cacheOpenSeaNfts(mapped)
+                await persist({
+                  slug: slugName,
+                  collectionId: colId,
+                  nfts: mapped,
+                  listedCount: again.listedCount || mapped.length,
+                })
+                return
+              }
+            }
           }
         }
 
