@@ -211,6 +211,8 @@ export function useOpenSeaCollectionNfts(
                 ...n,
                 collectionId: colId,
                 id: `${colId}-os-${n.tokenId}`,
+                // Lite payloads omit traits — keep iterable for filters/rarity
+                traits: Array.isArray(n.traits) ? n.traits : [],
               }))
 
             let nftsMapped = mapRemote(remote.nfts)

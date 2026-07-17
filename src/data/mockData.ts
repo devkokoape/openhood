@@ -152,13 +152,13 @@ function makeNfts(): Nft[] {
     const scores = group.map((nft) => {
       const counts = new Map<string, number>()
       for (const n of group) {
-        for (const t of n.traits) {
+        for (const t of n.traits || []) {
           const k = `${t.trait_type}::${t.value}`
           counts.set(k, (counts.get(k) || 0) + 1)
         }
       }
       let score = 0
-      for (const t of nft.traits) {
+      for (const t of nft.traits || []) {
         score += 1 / (counts.get(`${t.trait_type}::${t.value}`) || 1)
       }
       return { nft, score }

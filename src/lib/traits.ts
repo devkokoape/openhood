@@ -25,19 +25,28 @@ export interface RankedNft {
   percentile: number
 }
 
+/** Lite Fly payloads may omit traits — never assume array. */
+export function safeTraits(
+  nft: Pick<Nft, 'traits'> | null | undefined
+): { trait_type: string; value: string }[] {
+  const t = nft?.traits
+  return Array.isArray(t) ? t : []
+}
+
 /** Build trait type → value stats for a collection of NFTs */
 export function buildTraitStats(nfts: Nft[]): TraitTypeStat[] {
   const total = nfts.length || 1
   const map = new Map<string, Map<string, { count: number; floors: number[] }>>()
 
   for (const nft of nfts) {
-    for (const t of nft.traits) {
+    for (const t of safeTraits(nft)) {
+      if (t?.trait_type == null || t?.value == null) continue
       if (!map.has(t.trait_type)) map.set(t.trait_type, new Map())
       const vals = map.get(t.trait_type)!
-      const cur = vals.get(t.value) || { count: 0, floors: [] }
+      const cur = vals.get(String(t.value)) || { count: 0, floors: [] }
       cur.count++
       if (nft.listed && nft.price != null) cur.floors.push(nft.price)
-      vals.set(t.value, cur)
+      vals.set(String(t.value), cur)
     }
   }
 
@@ -67,7 +76,7 @@ export function buildTraitStats(nfts: Nft[]): TraitTypeStat[] {
 export function rarityScore(nft: Nft, allInCollection: Nft[]): number {
   const counts = countTraitValues(allInCollection)
   let score = 0
-  for (const t of nft.traits) {
+  for (const t of safeTraits(nft)) {
     const c = counts.get(`${t.trait_type}::${t.value}`) || 1
     score += 1 / c
   }
@@ -77,7 +86,7 @@ export function rarityScore(nft: Nft, allInCollection: Nft[]): number {
 function countTraitValues(nfts: Nft[]): Map<string, number> {
   const m = new Map<string, number>()
   for (const n of nfts) {
-    for (const t of n.traits) {
+    for (const t of safeTraits(n)) {
       const k = `${t.trait_type}::${t.value}`
       m.set(k, (m.get(k) || 0) + 1)
     }
@@ -106,7 +115,7 @@ export function filterByTraits(nfts: Nft[], filters: TraitFilterMap): Nft[] {
   if (entries.length === 0) return nfts
   return nfts.filter((nft) =>
     entries.every(([type, values]) =>
-      nft.traits.some((t) => t.trait_type === type && values.includes(t.value))
+      safeTraits(nft).some((t) => t.trait_type === type && values.includes(t.value))
     )
   )
 }

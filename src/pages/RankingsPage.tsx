@@ -164,7 +164,9 @@ export function RankingsPage() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex flex-wrap gap-1 max-w-md">
-                          {row.nft.traits.slice(0, 4).map((t) => (
+                          {(Array.isArray(row.nft.traits) ? row.nft.traits : [])
+                            .slice(0, 4)
+                            .map((t) => (
                             <span
                               key={t.trait_type}
                               className="px-1.5 py-0.5 rounded bg-surface-2 text-[10px] text-ink-2"

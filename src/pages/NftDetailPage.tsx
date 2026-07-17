@@ -504,7 +504,7 @@ export function NftDetailPage() {
               )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {nft.traits.map((t) => {
+              {(Array.isArray(nft.traits) ? nft.traits : []).map((t) => {
                 const stat = traitStats
                   .find((s) => s.trait_type === t.trait_type)
                   ?.values.find((v) => v.value === t.value)
