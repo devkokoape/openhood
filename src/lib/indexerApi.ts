@@ -88,21 +88,31 @@ export async function fetchIndexerStatus(): Promise<{
   collectionCount?: number
   listedTotal?: number
   lastFullSyncAt?: string | null
+  lastDownloadAt?: string | null
+  lastDownloadMode?: string | null
+  lastDownloadQueued?: number | null
   busy?: boolean
+  queueDepth?: number
   uptimeSec?: number
   memoryMb?: number
   nftsIndexed?: number
   nftsEnriched?: number
+  lastError?: string | null
 } | null> {
   const s = await getJson<{
     collectionCount?: number
     listedTotal?: number
     lastFullSyncAt?: string | null
+    lastDownloadAt?: string | null
+    lastDownloadMode?: string | null
+    lastDownloadQueued?: number | null
     busy?: boolean
+    queueDepth?: number
     uptimeSec?: number
     memoryMb?: number
     nftsIndexed?: number
     nftsEnriched?: number
+    lastError?: string | null
   }>('/v1/status')
   if (!s) return null
   return { ...s, ok: true }
@@ -267,10 +277,22 @@ export interface ContentStatusPayload {
   generatedAt: string
   busy: boolean
   queueDepth: number
+  progress?: {
+    startQueued: number
+    remaining: number
+    done: number
+    percent: number
+    mode?: string | null
+    startedAt?: string | null
+  }
   media?: { files?: number; mb?: number; bytes?: number }
+  nftsIndexed?: number
+  nftsEnriched?: number
+  listedTotal?: number
   lastDownloadAt?: string | null
   lastDownloadMode?: string | null
   lastDownloadQueued?: number | null
+  lastVerifiedQueued?: number | null
   lastError?: string | null
   summary: {
     collections: number

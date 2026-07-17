@@ -137,10 +137,17 @@ export function AdminPage() {
     collectionCount?: number
     listedTotal?: number
     lastFullSyncAt?: string | null
+    lastDownloadAt?: string | null
+    lastDownloadMode?: string | null
+    lastDownloadQueued?: number | null
     busy?: boolean
+    queueDepth?: number
     error?: string
     uptimeSec?: number
     memoryMb?: number
+    nftsIndexed?: number
+    nftsEnriched?: number
+    lastError?: string | null
   } | null>(null)
 
   const [content, setContent] = useState<ContentStatusPayload | null>(null)
@@ -236,9 +243,16 @@ export function AdminPage() {
           collectionCount: s.collectionCount,
           listedTotal: s.listedTotal,
           lastFullSyncAt: s.lastFullSyncAt,
+          lastDownloadAt: s.lastDownloadAt,
+          lastDownloadMode: s.lastDownloadMode,
+          lastDownloadQueued: s.lastDownloadQueued,
           busy: s.busy,
-          uptimeSec: (s as { uptimeSec?: number }).uptimeSec,
-          memoryMb: (s as { memoryMb?: number }).memoryMb,
+          queueDepth: s.queueDepth,
+          uptimeSec: s.uptimeSec,
+          memoryMb: s.memoryMb,
+          nftsIndexed: s.nftsIndexed,
+          nftsEnriched: s.nftsEnriched,
+          lastError: s.lastError,
         })
       } else {
         setFlyStatus({ ok: false, error: 'Unreachable' })
@@ -396,7 +410,8 @@ export function AdminPage() {
   useEffect(() => {
     if (tab !== 'content') return
     void loadContentStatus()
-    const id = window.setInterval(() => void loadContentStatus(), 15_000)
+    // 5s poll keeps queue/progress live without thrashing OpenSea
+    const id = window.setInterval(() => void loadContentStatus(), 5_000)
     return () => window.clearInterval(id)
   }, [tab, loadContentStatus])
 
@@ -408,7 +423,7 @@ export function AdminPage() {
       setDownloadMsg(null)
       try {
         const res = await triggerContentDownload(mode)
-        if (!res?.ok && res?.error) {
+        if (res?.error && res.ok === false) {
           setDownloadMsg(
             res.error === 'unauthorized'
               ? 'Unauthorized — Fly ADMIN_PASS must match the admin login password.'
@@ -695,38 +710,48 @@ export function AdminPage() {
               </div>
             </div>
 
-            {/* Live progress bar */}
-            {content && (content.busy || (content.queueDepth || 0) > 0) && (
+            {/* Live progress bar — uses startQueued vs remaining (not total collections) */}
+            {content &&
+              (content.busy ||
+                (content.queueDepth || 0) > 0 ||
+                (content.progress && content.progress.percent < 100 && content.progress.startQueued > 0)) && (
               <div className="rounded-xl border border-hood/25 bg-hood/10 px-3 py-3 space-y-1.5">
-                <div className="flex justify-between text-xs font-bold text-ink">
-                  <span>Download in progress on Fly</span>
+                <div className="flex justify-between text-xs font-bold text-ink gap-2 flex-wrap">
+                  <span>
+                    Download in progress
+                    {content.progress?.mode
+                      ? ` · ${content.progress.mode}`
+                      : content.lastDownloadMode
+                        ? ` · ${content.lastDownloadMode}`
+                        : ''}
+                  </span>
                   <span className="tabular-nums text-hood">
-                    queue {content.queueDepth ?? 0}
+                    {content.progress
+                      ? `${content.progress.done}/${content.progress.startQueued || '—'} done · ${content.progress.remaining} left · ${content.progress.percent}%`
+                      : `queue ${content.queueDepth ?? 0}`}
                     {content.busy ? ' · working' : ''}
                   </span>
                 </div>
-                <div className="h-2 rounded-full bg-surface-3 overflow-hidden">
+                <div className="h-2.5 rounded-full bg-surface-3 overflow-hidden">
                   <div
                     className="h-full bg-hood transition-all duration-500"
                     style={{
-                      width: `${Math.min(
-                        100,
-                        Math.max(
-                          4,
-                          100 -
-                            Math.min(
-                              100,
-                              ((content.queueDepth || 0) / Math.max(content.summary.collections || 1, 1)) *
-                                100
-                            )
-                        )
+                      width: `${Math.max(
+                        content.busy || (content.queueDepth || 0) > 0 ? 3 : 0,
+                        content.progress?.percent ?? 0
                       )}%`,
                     }}
                   />
                 </div>
                 <p className="text-[11px] text-ink-3">
-                  Queue goes down as each collection finishes. Refresh status to update numbers.
-                  “With listings” and “Art enrich %” should rise over time.
+                  Jobs finish one-by-one on Fly (OpenSea rate limits apply). Art enrich % and
+                  “with listings” rise as the queue drains.
+                  {content.lastError ? (
+                    <span className="block mt-1 text-[var(--color-danger)]">
+                      Last error: {content.lastError.slice(0, 160)}
+                      {content.lastError.length > 160 ? '…' : ''}
+                    </span>
+                  ) : null}
                 </p>
               </div>
             )}
@@ -792,13 +817,16 @@ export function AdminPage() {
               <span>
                 Listed NFTs:{' '}
                 <strong className="text-ink tabular-nums">
-                  {content?.summary.totalListed?.toLocaleString() ?? '—'}
+                  {(content?.listedTotal ?? content?.summary.totalListed)?.toLocaleString() ??
+                    '—'}
                 </strong>
               </span>
               <span>
                 Enriched:{' '}
                 <strong className="text-ink tabular-nums">
-                  {content?.summary.totalEnriched?.toLocaleString() ?? '—'}
+                  {(
+                    content?.nftsEnriched ?? content?.summary.totalEnriched
+                  )?.toLocaleString() ?? '—'}
                 </strong>
               </span>
               <span>
@@ -810,10 +838,21 @@ export function AdminPage() {
               <span>
                 Queue:{' '}
                 <strong className="text-hood tabular-nums">
-                  {content?.queueDepth ?? (content?.busy ? '…' : 0)}
+                  {content?.queueDepth ?? 0}
                 </strong>
-                {content?.busy ? ' · busy' : ''}
+                {content?.busy ? ' · busy' : ' · idle'}
               </span>
+              {content?.lastDownloadAt && (
+                <span>
+                  Last download:{' '}
+                  <strong className="text-ink">
+                    {timeAgo(content.lastDownloadAt)}
+                    {content.lastDownloadMode
+                      ? ` (${content.lastDownloadMode})`
+                      : ''}
+                  </strong>
+                </span>
+              )}
               {content?.media?.files != null && (
                 <span>
                   Media cache:{' '}
@@ -1029,6 +1068,36 @@ export function AdminPage() {
                             : '—'}
                       </span>
                     </div>
+                    <div>
+                      Queue{' '}
+                      <span className="font-semibold text-hood tabular-nums">
+                        {flyStatus?.queueDepth ?? 0}
+                      </span>
+                      {flyStatus?.busy ? ' · busy' : ' · idle'}
+                      {(flyStatus?.nftsEnriched != null ||
+                        flyStatus?.nftsIndexed != null) && (
+                        <>
+                          {' · '}
+                          Art{' '}
+                          <span className="font-semibold text-ink tabular-nums">
+                            {flyStatus?.nftsEnriched?.toLocaleString() ?? '—'}
+                            /
+                            {flyStatus?.nftsIndexed?.toLocaleString() ?? '—'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {flyStatus?.lastDownloadAt && (
+                      <div>
+                        Last download:{' '}
+                        <span className="font-semibold text-ink">
+                          {timeAgo(flyStatus.lastDownloadAt)}
+                          {flyStatus.lastDownloadMode
+                            ? ` (${flyStatus.lastDownloadMode})`
+                            : ''}
+                        </span>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div>
@@ -1053,9 +1122,9 @@ export function AdminPage() {
                         : '—'}
                   </span>
                 </div>
-                {dash?.server.lastError && (
+                {(flyStatus?.lastError || dash?.server.lastError) && (
                   <div className="text-[var(--color-danger)] text-[11px] line-clamp-2">
-                    {dash.server.lastError}
+                    {flyStatus?.lastError || dash?.server.lastError}
                   </div>
                 )}
               </div>

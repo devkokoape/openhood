@@ -87,6 +87,13 @@ export function getMeta() {
     lastError: stored.lastError || null,
     syncCount: stored.syncCount || 0,
     slugQueue: stored.slugQueue || [],
+    // Admin download progress (written by downloadAllContent / warmPriority)
+    lastDownloadAt: stored.lastDownloadAt || null,
+    lastDownloadMode: stored.lastDownloadMode || null,
+    lastDownloadQueued: stored.lastDownloadQueued ?? null,
+    lastVerifiedQueued: stored.lastVerifiedQueued ?? null,
+    lastDownloadMainnetOnly: stored.lastDownloadMainnetOnly ?? null,
+    warmVerifiedCount: stored.warmVerifiedCount ?? null,
     collectionCount: s.collections,
     listedTotal: s.listed,
     nftsIndexed: s.nfts,

@@ -552,21 +552,42 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname === '/v1/content-status') {
       const content = dbContentStatus()
       const meta = getMeta()
+      const q = queueDepth()
+      const startQ = Number(meta.lastDownloadQueued || 0)
+      const doneJobs = startQ > 0 ? Math.max(0, startQ - q) : 0
+      const progressPct =
+        startQ > 0
+          ? Math.min(100, Math.round((doneJobs / startQ) * 100))
+          : q > 0
+            ? 0
+            : 100
       return json(
         res,
         200,
         {
           generatedAt: new Date().toISOString(),
           busy: isSyncBusy(),
-          queueDepth: queueDepth(),
+          queueDepth: q,
+          progress: {
+            startQueued: startQ,
+            remaining: q,
+            done: doneJobs,
+            percent: progressPct,
+            mode: meta.lastDownloadMode || null,
+            startedAt: meta.lastDownloadAt || null,
+          },
           media: mediaStats(),
+          nftsIndexed: meta.nftsIndexed,
+          nftsEnriched: meta.nftsEnriched,
+          listedTotal: meta.listedTotal,
           lastDownloadAt: meta.lastDownloadAt || null,
           lastDownloadMode: meta.lastDownloadMode || null,
-          lastDownloadQueued: meta.lastDownloadQueued || null,
+          lastDownloadQueued: meta.lastDownloadQueued ?? null,
+          lastVerifiedQueued: meta.lastVerifiedQueued ?? null,
           lastError: meta.lastError || null,
           ...content,
         },
-        5
+        3
       )
     }
 
