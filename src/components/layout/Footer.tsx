@@ -6,7 +6,6 @@ import { MARKETPLACE_EXPLORER } from '../../lib/marketplace'
 const product = [
   { to: '/', label: 'Discover' },
   { to: '/collections', label: 'Collections' },
-  { to: '/rankings', label: 'Rankings' },
   { to: '/activity', label: 'Activity' },
 ]
 

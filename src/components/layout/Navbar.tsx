@@ -23,7 +23,6 @@ import {
 const publicLinks = [
   { to: '/', label: 'Discover', end: true, icon: Layers },
   { to: '/collections', label: 'Collections', end: false, icon: Layers },
-  { to: '/rankings', label: 'Rankings', end: false, icon: Activity },
   { to: '/degen', label: 'Degen', end: false, icon: Zap },
   { to: '/activity', label: 'Activity', end: false, icon: Activity },
 ]

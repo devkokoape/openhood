@@ -1,10 +1,11 @@
-import { useMemo, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
   Flame,
+  Compass,
   Trophy,
   Zap,
 } from 'lucide-react'
@@ -18,6 +19,7 @@ import {
 } from '../components/nft/TrendingTable'
 import { NotableCollectionCard } from '../components/nft/NotableCollectionCard'
 import { HomeActivityFeed } from '../components/nft/HomeActivityFeed'
+import { EmptyState } from '../components/ui/EmptyState'
 import { formatPrice } from '../data/mockData'
 import { ONCHAIN_COLLECTION_SLUG, isMarketplaceDeployed } from '../lib/marketplace'
 import clsx from 'clsx'
@@ -28,6 +30,7 @@ export function Home() {
   const q = (params.get('q') || '').toLowerCase()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const notableRef = useRef<HTMLDivElement>(null)
+  const [discoverScroll, setDiscoverScroll] = useState({ atStart: true, atEnd: false })
 
   const featured = useMemo(() => {
     let list = [...collections].sort((a, b) => b.volume24h - a.volume24h)
@@ -41,6 +44,9 @@ export function Home() {
     }
     return list
   }, [collections, q])
+
+  /** Top by 24h volume for Discover rail (marketplace-length strip) */
+  const discoverCollections = useMemo(() => featured.slice(0, 16), [featured])
 
   /** Top collections by 7-day sales (fallback: 7d volume) — single row */
   const notableCollections = useMemo(() => {
@@ -59,8 +65,36 @@ export function Home() {
 
   const totalVol = collections.reduce((s, c) => s + c.volume24h, 0)
 
+  const updateDiscoverScroll = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const max = el.scrollWidth - el.clientWidth
+    const left = el.scrollLeft
+    setDiscoverScroll({
+      atStart: left <= 4,
+      atEnd: max <= 4 || left >= max - 4,
+    })
+  }, [])
+
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    updateDiscoverScroll()
+    el.addEventListener('scroll', updateDiscoverScroll, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateDiscoverScroll) : null
+    ro?.observe(el)
+    return () => {
+      el.removeEventListener('scroll', updateDiscoverScroll)
+      ro?.disconnect()
+    }
+  }, [updateDiscoverScroll, discoverCollections.length])
+
   const scrollBy = (dir: -1 | 1, ref: RefObject<HTMLDivElement | null>) => {
-    ref.current?.scrollBy({ left: dir * 280, behavior: 'smooth' })
+    const el = ref.current
+    if (!el) return
+    const card = el.querySelector<HTMLElement>(':scope > *')
+    const step = card ? card.offsetWidth + 14 : 300
+    el.scrollBy({ left: dir * step * 2, behavior: 'smooth' })
   }
 
   return (
@@ -127,39 +161,64 @@ export function Home() {
           ))}
         </div>
 
-        {/* Discover collections carousel */}
-        <section>
-          <div className="flex items-end justify-between mb-3 gap-3">
-            <div className="min-w-0">
-              <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
-                {q ? `Results for “${q}”` : 'Discover'}
-              </h2>
-              <p className="text-xs sm:text-sm text-ink-3 mt-0.5">
-                Top collections by 24h volume on Robinhood Chain
-              </p>
+        {/* Discover — marketplace-tier collection rail */}
+        <section aria-labelledby="discover-heading" className="relative">
+          <div className="flex items-end justify-between mb-4 gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <div className="mt-0.5 w-9 h-9 rounded-xl bg-surface-2 border border-edge flex items-center justify-center shrink-0">
+                <Compass className="w-4 h-4 text-hood" strokeWidth={2.25} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2
+                    id="discover-heading"
+                    className="text-xl sm:text-2xl font-extrabold text-ink tracking-tight"
+                  >
+                    {q ? `Results for “${q}”` : 'Discover'}
+                  </h2>
+                  {!q && discoverCollections.length > 0 && (
+                    <span className="hidden sm:inline-flex items-center h-6 px-2 rounded-full bg-surface-2 border border-edge text-[11px] font-semibold text-ink-3 tabular-nums">
+                      Top {discoverCollections.length} · 24h vol
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs sm:text-sm text-ink-3 mt-0.5 leading-relaxed">
+                  {q
+                    ? 'Collections matching your search on Robinhood Chain'
+                    : 'Top collections by 24h volume on Robinhood Chain'}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <div className="hidden sm:flex gap-1">
+
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="hidden sm:flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => scrollBy(-1, scrollerRef)}
-                  className="w-8 h-8 rounded-full border border-edge bg-surface hover:border-hood hover:text-hood flex items-center justify-center cursor-pointer"
-                  aria-label="Scroll left"
+                  className="market-icon-btn"
+                  aria-label="Scroll Discover left"
+                  disabled={discoverScroll.atStart || discoverCollections.length === 0}
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
                   type="button"
                   onClick={() => scrollBy(1, scrollerRef)}
-                  className="w-8 h-8 rounded-full border border-edge bg-surface hover:border-hood hover:text-hood flex items-center justify-center cursor-pointer"
-                  aria-label="Scroll right"
+                  className="market-icon-btn"
+                  aria-label="Scroll Discover right"
+                  disabled={discoverScroll.atEnd || discoverCollections.length === 0}
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
               <Link
-                to="/collections"
-                className="text-xs sm:text-sm font-bold text-hood hover:underline inline-flex items-center gap-1"
+                to={q ? `/collections?q=${encodeURIComponent(q)}` : '/collections'}
+                className={clsx(
+                  'inline-flex items-center gap-1 h-8 px-3 rounded-full',
+                  'text-xs sm:text-sm font-bold text-hood',
+                  'bg-hood-muted/60 hover:bg-hood-muted border border-hood/15',
+                  'transition-colors'
+                )}
               >
                 View all
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -167,18 +226,51 @@ export function Home() {
             </div>
           </div>
 
-          {featured.length === 0 ? (
-            <p className="text-ink-3 text-sm py-8 text-center">No collections match your search.</p>
+          {discoverCollections.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-edge bg-surface-2/40">
+              <EmptyState
+                title={q ? 'No collections match' : 'No collections yet'}
+                description={
+                  q
+                    ? 'Try a different search or browse the full catalog.'
+                    : 'Collections will appear here as the market loads.'
+                }
+                actionLabel="Browse collections"
+                actionTo="/collections"
+                icon={<Compass className="w-5 h-5" />}
+              />
+            </div>
           ) : (
-            <div
-              ref={scrollerRef}
-              className="flex gap-2.5 sm:gap-3 overflow-x-auto pb-1 snap-x snap-mandatory scroll-smooth hide-scrollbar -mx-2 px-2 sm:-mx-3 sm:px-3 lg:-mx-4 lg:px-4"
-            >
-              {featured.map((c, i) => (
-                <div key={c.id} className="snap-start">
-                  <FeaturedCollectionCard collection={c} rank={i + 1} />
-                </div>
-              ))}
+            <div className="market-rail-fade -mx-2 px-2 sm:-mx-3 sm:px-3 lg:-mx-4 lg:px-4">
+              <div
+                ref={scrollerRef}
+                className="market-rail hide-scrollbar"
+                role="list"
+                aria-label="Discover collections"
+              >
+                {discoverCollections.map((c, i) => (
+                  <div key={c.id} role="listitem" className="snap-start">
+                    <FeaturedCollectionCard collection={c} rank={i + 1} />
+                  </div>
+                ))}
+
+                {/* End-of-rail CTA card */}
+                <Link
+                  to="/collections"
+                  className={clsx(
+                    'snap-start shrink-0 flex flex-col items-center justify-center gap-2',
+                    'w-[140px] sm:w-[160px] min-h-[272px] sm:min-h-[288px]',
+                    'rounded-2xl border border-dashed border-edge bg-surface-2/50',
+                    'text-ink-2 hover:text-hood hover:border-hood/40 hover:bg-hood-muted/30',
+                    'transition-colors duration-200'
+                  )}
+                >
+                  <span className="w-10 h-10 rounded-full border border-edge bg-surface flex items-center justify-center">
+                    <ArrowRight className="w-4 h-4" />
+                  </span>
+                  <span className="text-xs font-bold">See all</span>
+                </Link>
+              </div>
             </div>
           )}
         </section>
@@ -281,7 +373,7 @@ export function Home() {
                 to="/collections"
                 className="text-xs sm:text-sm font-bold text-hood hover:underline inline-flex items-center gap-1"
               >
-                Rankings
+                View all
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>

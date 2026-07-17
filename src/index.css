@@ -277,3 +277,97 @@ a,
 .sticky-under-nav-toolbar {
   top: calc(3.5rem + 2.75rem + env(safe-area-inset-top, 0px));
 }
+
+/* Text on hood-green CTAs / badges */
+:root {
+  --color-on-hood: #0b0e11;
+}
+
+/* Marketplace-tier horizontal rail (Discover, Notable, etc.) */
+.market-rail {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  padding-bottom: 0.25rem;
+}
+@media (min-width: 640px) {
+  .market-rail {
+    gap: 0.875rem;
+  }
+}
+.market-rail > * {
+  scroll-snap-align: start;
+}
+
+/* Edge fade so cards don't hard-clip against page chrome */
+.market-rail-fade {
+  position: relative;
+}
+.market-rail-fade::before,
+.market-rail-fade::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0.25rem;
+  width: 1.25rem;
+  z-index: 2;
+  pointer-events: none;
+}
+.market-rail-fade::before {
+  left: 0;
+  background: linear-gradient(to right, var(--color-surface), transparent);
+}
+.market-rail-fade::after {
+  right: 0;
+  width: 2rem;
+  background: linear-gradient(to left, var(--color-surface), transparent);
+}
+@media (min-width: 640px) {
+  .market-rail-fade::before {
+    width: 1.5rem;
+  }
+  .market-rail-fade::after {
+    width: 2.5rem;
+  }
+}
+
+/* Section header control (carousel arrows) */
+.market-icon-btn {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.market-icon-btn:hover:not(:disabled) {
+  border-color: var(--color-hood);
+  color: var(--color-hood);
+  background: var(--color-surface-2);
+}
+.market-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.market-icon-btn:focus-visible {
+  outline: 2px solid rgba(0, 200, 5, 0.45);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in {
+    animation: none;
+  }
+  .market-rail {
+    scroll-behavior: auto;
+  }
+}

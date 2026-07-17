@@ -17,7 +17,6 @@ import { DegenShell } from './components/degen/DegenShell'
 import { DegenOverview } from './pages/DegenOverview'
 import { DegenMintsPage } from './pages/DegenMintsPage'
 import { MintPage } from './pages/MintPage'
-import { RankingsPage } from './pages/RankingsPage'
 import { AdminPage } from './pages/AdminPage'
 import { AdminGate } from './components/admin/AdminGate'
 
@@ -34,7 +33,8 @@ export default function App() {
                 <Route element={<Layout />}>
                   <Route index element={<Home />} />
                   <Route path="collections" element={<CollectionsPage />} />
-                  <Route path="rankings" element={<RankingsPage />} />
+                  {/* Rankings removed — rarity lives on each collection page */}
+                  <Route path="rankings" element={<Navigate to="/collections" replace />} />
                   <Route path="collection/:slug" element={<CollectionPage />} />
                   <Route
                     path="collection/:slug/edit"
