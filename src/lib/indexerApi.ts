@@ -285,6 +285,8 @@ export interface ContentStatusRow {
   nftsCount: number
   enrichedCount: number
   stubCount: number
+  /** Listed tokens still missing real traits/metadata */
+  missingMetaCount?: number
   enrichPct: number
   hasImage: boolean
   floorPrice: number

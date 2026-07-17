@@ -182,8 +182,23 @@ function parseJson(s, fallback) {
   }
 }
 
-function isEnriched(image, name, _traits) {
-  // Art + name is enough. Traits are best-effort (many collections are pre-reveal).
+/** True when traits look like real OpenSea attributes (not listing stubs). */
+function hasRealTraitsMeta(traits) {
+  if (!Array.isArray(traits) || traits.length === 0) return false
+  const real = traits.filter(
+    (t) =>
+      t?.trait_type &&
+      t.trait_type !== 'Status' &&
+      t.trait_type !== 'Token ID'
+  )
+  return real.length > 0
+}
+
+/**
+ * Fully downloaded token: real art + real name + real traits/metadata.
+ * Partial enrich (art only) stays enriched=0 until metadata is also filled.
+ */
+function isEnriched(image, name, traits) {
   if (!image) return 0
   const img = String(image)
   if (
@@ -194,6 +209,7 @@ function isEnriched(image, name, _traits) {
     return 0
   if (/image_type_(logo|hero|featured)/i.test(img)) return 0
   if (!name || String(name).startsWith('#')) return 0
+  if (!hasRealTraitsMeta(traits)) return 0
   return 1
 }
 
@@ -602,30 +618,85 @@ export function dbStats() {
 const VERIFIED_MIN_VOLUME_ETH = Number(process.env.VERIFIED_MIN_VOLUME_ETH || 3)
 
 /**
- * Public marketplace "fully downloaded" gate.
- * listed>0 and essentially complete enrich (prefer 100%; allow tiny residual for OS 429).
- * Incomplete / partial collections stay off Discover and /collections until they pass.
+ * Public marketplace gate — STRICT 100% only.
+ *
+ * A collection is marketplace-ready when every *listed* NFT has:
+ *  - real artwork (no dicebear / logo / empty stubs)
+ *  - real metadata name (enriched flag: art + non-# name)
+ *  - real traits/metadata when present on OpenSea (missingMeta === 0)
+ *
+ * Partial downloads stay off Discover /collections. Backend keeps enriching;
+ * once a slug hits 100%, the next public poll auto-includes it.
  */
-export function isContentReady(listed, enriched, stubs) {
+export function isContentReady(listed, enriched, stubs, missingMeta = 0) {
   const L = Number(listed || 0)
   const E = Number(enriched || 0)
   const S = Number(stubs || 0)
+  const M = Number(missingMeta || 0)
   if (L <= 0) return false
-  const enrichPct = Math.round((E / Math.max(L, 1)) * 100)
-  // Prefer fully enriched; allow practical near-complete for large books
-  return (
-    enrichPct >= 100 ||
-    (S === 0 && enrichPct >= 95) ||
-    enrichPct >= 90 ||
-    (enrichPct >= 75 && S <= Math.max(3, Math.floor(L * 0.05))) ||
-    (enrichPct >= 60 && S <= Math.max(5, Math.floor(L * 0.15))) ||
-    (S === 0 && enrichPct >= 50)
-  )
+  // Zero incomplete listed tokens — art + name + metadata
+  return S === 0 && E >= L && M === 0
 }
 
 /** Short-lived cache so home/collections polls don't re-scan all NFTs every hit */
 let readySlugCache = { at: 0, set: null }
-const READY_SLUG_TTL_MS = 12_000
+const READY_SLUG_TTL_MS = 10_000
+
+/**
+ * True when traits_json is only listing stubs (Status / Token ID) or empty.
+ * Real OS attributes (Background, Eyes, …) make this false.
+ */
+function traitsJsonMissingRealMeta(traitsJson) {
+  if (traitsJson == null || traitsJson === '' || traitsJson === '[]') return true
+  let traits
+  try {
+    traits = JSON.parse(traitsJson)
+  } catch {
+    return true
+  }
+  return !hasRealTraitsMeta(traits)
+}
+
+/**
+ * Per-slug listed completeness (listed only — unlisted historical rows don't block).
+ * Uses JS trait parse so Status/Token-ID-only stubs never count as metadata.
+ */
+function dbNftCompletenessAgg() {
+  const database = getDb()
+  // Pull listed rows only — accuracy over pure SQL heuristics
+  const rows = database
+    .prepare(
+      `SELECT slug, image, name, enriched, traits_json
+       FROM nfts
+       WHERE listed = 1`
+    )
+    .all()
+
+  /** @type {Map<string, { listed: number, enriched: number, stubs: number, missing_meta: number }>} */
+  const bySlug = new Map()
+  for (const r of rows) {
+    let a = bySlug.get(r.slug)
+    if (!a) {
+      a = { listed: 0, enriched: 0, stubs: 0, missing_meta: 0 }
+      bySlug.set(r.slug, a)
+    }
+    a.listed++
+    const img = r.image == null ? '' : String(r.image)
+    const isStub =
+      !img ||
+      img.includes('dicebear') ||
+      img.startsWith('data:image/svg') ||
+      img.includes('seed=openhood') ||
+      /image_type_(logo|hero|featured)/i.test(img)
+    if (isStub) a.stubs++
+    const missingMeta = traitsJsonMissingRealMeta(r.traits_json)
+    if (missingMeta) a.missing_meta++
+    // Enriched only if art + name + real traits (recompute; don't trust stale flag)
+    const nameOk = r.name && !String(r.name).startsWith('#')
+    if (!isStub && nameOk && !missingMeta) a.enriched++
+  }
+  return [...bySlug.entries()].map(([slug, a]) => ({ slug, ...a }))
+}
 
 /**
  * Set of slugs that passed isContentReady (public catalog filter).
@@ -639,23 +710,10 @@ export function dbReadySlugSet({ force = false } = {}) {
   ) {
     return readySlugCache.set
   }
-  const database = getDb()
-  const nftAgg = database
-    .prepare(
-      `SELECT slug,
-         SUM(CASE WHEN listed = 1 THEN 1 ELSE 0 END) AS listed,
-         SUM(CASE WHEN enriched = 1 THEN 1 ELSE 0 END) AS enriched,
-         SUM(CASE
-           WHEN image IS NULL OR image = '' OR image LIKE '%dicebear%'
-             OR image LIKE 'data:image/svg%' OR image LIKE '%seed=openhood%'
-           THEN 1 ELSE 0 END) AS stubs
-       FROM nfts
-       GROUP BY slug`
-    )
-    .all()
+  const nftAgg = dbNftCompletenessAgg()
   const set = new Set()
   for (const a of nftAgg) {
-    if (isContentReady(a.listed, a.enriched, a.stubs)) {
+    if (isContentReady(a.listed, a.enriched, a.stubs, a.missing_meta)) {
       set.add(a.slug)
     }
   }
@@ -688,21 +746,14 @@ export function dbContentStatus() {
     )
     .all()
 
-  const nftAgg = database
-    .prepare(
-      `SELECT slug,
-         COUNT(*) AS nfts,
-         SUM(CASE WHEN listed = 1 THEN 1 ELSE 0 END) AS listed,
-         SUM(CASE WHEN enriched = 1 THEN 1 ELSE 0 END) AS enriched,
-         SUM(CASE
-           WHEN image IS NULL OR image = '' OR image LIKE '%dicebear%'
-             OR image LIKE 'data:image/svg%' OR image LIKE '%seed=openhood%'
-           THEN 1 ELSE 0 END) AS stubs
-       FROM nfts
-       GROUP BY slug`
-    )
+  // Completeness uses listed-only art/meta (same as public marketplace gate)
+  const completeAgg = dbNftCompletenessAgg()
+  const bySlug = new Map(completeAgg.map((r) => [r.slug, r]))
+  // total nfts (listed + unlisted) for admin display only
+  const nftCounts = database
+    .prepare(`SELECT slug, COUNT(*) AS nfts FROM nfts GROUP BY slug`)
     .all()
-  const bySlug = new Map(nftAgg.map((r) => [r.slug, r]))
+  const nftsBySlug = new Map(nftCounts.map((r) => [r.slug, Number(r.nfts || 0)]))
 
   let withListings = 0
   let empty = 0
@@ -717,18 +768,23 @@ export function dbContentStatus() {
 
   const collections = cols.map((c) => {
     const a = bySlug.get(c.slug) || {
-      nfts: 0,
       listed: 0,
       enriched: 0,
       stubs: 0,
+      missing_meta: 0,
     }
     const listed = Number(a.listed || c.listed_count || 0)
-    const nfts = Number(a.nfts || 0)
+    const nfts = nftsBySlug.get(c.slug) || 0
     const enriched = Number(a.enriched || 0)
     const stubs = Number(a.stubs || 0)
+    const missingMeta = Number(a.missing_meta || 0)
     const hasImage = Boolean(c.image && !String(c.image).includes('dicebear'))
+    // Progress = min(art, meta) completeness toward 100% marketplace ready
+    const complete = Math.min(enriched, listed - stubs, listed - missingMeta)
     const enrichPct =
-      listed > 0 ? Math.round((enriched / Math.max(listed, 1)) * 100) : 0
+      listed > 0
+        ? Math.min(100, Math.round((Math.max(0, complete) / Math.max(listed, 1)) * 100))
+        : 0
 
     const volumeTotal = Number(c.volume_total || 0)
     const verified =
@@ -739,7 +795,10 @@ export function dbContentStatus() {
       status = c.synced_at ? 'empty' : 'shell'
       empty++
       if (!c.synced_at) shell++
-    } else if (listed > 0 && isContentReady(listed, enriched, stubs)) {
+    } else if (
+      listed > 0 &&
+      isContentReady(listed, enriched, stubs, missingMeta)
+    ) {
       status = 'ready'
       ready++
     } else if (listed > 0) {
@@ -763,6 +822,7 @@ export function dbContentStatus() {
       nftsCount: nfts,
       enrichedCount: enriched,
       stubCount: stubs,
+      missingMetaCount: missingMeta,
       enrichPct,
       hasImage,
       floorPrice: c.floor_price || 0,
@@ -778,10 +838,12 @@ export function dbContentStatus() {
 
   const verifiedCount = collections.filter((c) => c.verified).length
 
-  // Keep public ready cache in sync with admin view
+  // Keep public ready cache in sync with admin view (strict 100% only)
   readySlugCache = {
     at: Date.now(),
-    set: new Set(collections.filter((c) => c.status === 'ready').map((c) => c.slug)),
+    set: new Set(
+      collections.filter((c) => c.status === 'ready').map((c) => c.slug)
+    ),
   }
 
   return {

@@ -448,18 +448,18 @@ export async function fillListedFromCatalog(slug, nfts, collectionId, { maxPages
               : existing.traits,
         rarityRank: raw.rarity?.rank ?? existing.rarityRank,
       })
-      // Only drop from needed once we have real art AND real traits
+      // Only drop from needed once we have real art AND real traits/metadata
       const nextRow = byToken.get(tid)
       if (
         nextRow &&
         !isPlaceholderImage(nextRow.image) &&
-        hasRealTraits(nextRow.traits)
+        hasRealTraits(nextRow.traits) &&
+        nextRow.name &&
+        !String(nextRow.name).startsWith('#')
       ) {
         needed.delete(tid)
-      } else if (nextRow && !isPlaceholderImage(nextRow.image)) {
-        // art ok — still want traits but don't block forever on catalog miss
-        needed.delete(tid)
       }
+      // Keep paging for tokens that still lack art or metadata
     }
     next = data?.next
     if (!next) break
