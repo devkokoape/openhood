@@ -155,11 +155,13 @@ export async function fetchIndexerCollections(opts?: {
   return data?.collections ?? null
 }
 
-/** Thin home feed — one request for Discover (OpenSea/ME style) */
+/** Thin home feed — one request for Discover (OpenSea/ME style). Ready-only. */
 export interface HomeFeedPayload {
   generatedAt: string
+  readyOnly?: boolean
   stats: {
     collections: number
+    ready?: number
     listedTotal: number
     volume24h: number
     verified: number

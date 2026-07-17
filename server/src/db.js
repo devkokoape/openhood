@@ -602,6 +602,73 @@ export function dbStats() {
 const VERIFIED_MIN_VOLUME_ETH = Number(process.env.VERIFIED_MIN_VOLUME_ETH || 3)
 
 /**
+ * Public marketplace "fully downloaded" gate.
+ * listed>0 and essentially complete enrich (prefer 100%; allow tiny residual for OS 429).
+ * Incomplete / partial collections stay off Discover and /collections until they pass.
+ */
+export function isContentReady(listed, enriched, stubs) {
+  const L = Number(listed || 0)
+  const E = Number(enriched || 0)
+  const S = Number(stubs || 0)
+  if (L <= 0) return false
+  const enrichPct = Math.round((E / Math.max(L, 1)) * 100)
+  // Prefer fully enriched; allow practical near-complete for large books
+  return (
+    enrichPct >= 100 ||
+    (S === 0 && enrichPct >= 95) ||
+    enrichPct >= 90 ||
+    (enrichPct >= 75 && S <= Math.max(3, Math.floor(L * 0.05))) ||
+    (enrichPct >= 60 && S <= Math.max(5, Math.floor(L * 0.15))) ||
+    (S === 0 && enrichPct >= 50)
+  )
+}
+
+/** Short-lived cache so home/collections polls don't re-scan all NFTs every hit */
+let readySlugCache = { at: 0, set: null }
+const READY_SLUG_TTL_MS = 12_000
+
+/**
+ * Set of slugs that passed isContentReady (public catalog filter).
+ */
+export function dbReadySlugSet({ force = false } = {}) {
+  const now = Date.now()
+  if (
+    !force &&
+    readySlugCache.set &&
+    now - readySlugCache.at < READY_SLUG_TTL_MS
+  ) {
+    return readySlugCache.set
+  }
+  const database = getDb()
+  const nftAgg = database
+    .prepare(
+      `SELECT slug,
+         SUM(CASE WHEN listed = 1 THEN 1 ELSE 0 END) AS listed,
+         SUM(CASE WHEN enriched = 1 THEN 1 ELSE 0 END) AS enriched,
+         SUM(CASE
+           WHEN image IS NULL OR image = '' OR image LIKE '%dicebear%'
+             OR image LIKE 'data:image/svg%' OR image LIKE '%seed=openhood%'
+           THEN 1 ELSE 0 END) AS stubs
+       FROM nfts
+       GROUP BY slug`
+    )
+    .all()
+  const set = new Set()
+  for (const a of nftAgg) {
+    if (isContentReady(a.listed, a.enriched, a.stubs)) {
+      set.add(a.slug)
+    }
+  }
+  readySlugCache = { at: now, set }
+  return set
+}
+
+/** Invalidate ready cache after sync/enrich (optional callers) */
+export function invalidateReadySlugCache() {
+  readySlugCache = { at: 0, set: null }
+}
+
+/**
  * Per-collection content health for admin panel.
  * status: ready | partial | empty | shell
  * Ordered: verified first, then by listed count.
@@ -672,13 +739,7 @@ export function dbContentStatus() {
       status = c.synced_at ? 'empty' : 'shell'
       empty++
       if (!c.synced_at) shell++
-    } else if (
-      listed > 0 &&
-      // Practical "ready": most art filled (OpenSea 429 means 100% is rare for large books)
-      (enrichPct >= 75 ||
-        (enrichPct >= 60 && stubs <= Math.max(5, Math.floor(listed * 0.15))) ||
-        (stubs === 0 && enrichPct >= 50))
-    ) {
+    } else if (listed > 0 && isContentReady(listed, enriched, stubs)) {
       status = 'ready'
       ready++
     } else if (listed > 0) {
@@ -716,6 +777,12 @@ export function dbContentStatus() {
   })
 
   const verifiedCount = collections.filter((c) => c.verified).length
+
+  // Keep public ready cache in sync with admin view
+  readySlugCache = {
+    at: Date.now(),
+    set: new Set(collections.filter((c) => c.status === 'ready').map((c) => c.slug)),
+  }
 
   return {
     summary: {

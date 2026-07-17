@@ -131,10 +131,14 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const actor = connected && address ? actorId(address) : ''
   const user = actor && address ? formatAddress(address) : ''
 
-  /** Pre-index catalog (OpenSea + demo + OpenHood testnet) */
+  /**
+   * Public catalog: Fly ready-only OpenSea markets + optional local demo/on-chain.
+   * Incomplete downloads never appear in openSeaCollections (server filters them).
+   */
   const baseCollections = useMemo(() => {
     void tick
     const liveOs = openSeaCollections
+    // Keep non-OpenSea demos (Degen, testnet) but never re-inject seed OS stubs
     const demoLocal = seedCollections.filter((c) => c.source !== 'opensea')
 
     let list: Collection[] = [...liveOs, ...demoLocal]

@@ -25,7 +25,7 @@ import {
   saveToDisk,
   storageInfo,
 } from './store.js'
-import { dbContentStatus } from './db.js'
+import { dbContentStatus, dbReadySlugSet } from './db.js'
 import {
   defaultSlugs,
   discoverPass,
@@ -250,7 +250,12 @@ const server = http.createServer(async (req, res) => {
         200,
         Math.max(1, Number(url.searchParams.get('limit') || 80))
       )
-      let rows = listCollections().map(summarize)
+      // Public marketplace: only fully downloaded (ready) collections.
+      // Admin content-status still lists everything.
+      const ready = dbReadySlugSet()
+      let rows = listCollections()
+        .map(summarize)
+        .filter((r) => ready.has(r.slug))
       // Prefer markets with volume / listings first
       rows = [...rows].sort(
         (a, b) =>
@@ -263,19 +268,28 @@ const server = http.createServer(async (req, res) => {
       return json(
         res,
         200,
-        { collections: rows, count: rows.length, total },
-        15
+        {
+          collections: rows,
+          count: rows.length,
+          total,
+          readyOnly: true,
+        },
+        12
       )
     }
 
     // GET /v1/home — OpenSea/MagicEden-style thin home feed (one request)
+    // Only fully downloaded (ready) collections — incomplete stay hidden until 100%.
     if (req.method === 'GET' && pathname === '/v1/home') {
       const limit = Math.min(
         60,
         Math.max(8, Number(url.searchParams.get('limit') || 36))
       )
       const VERIFIED_MIN = Number(process.env.VERIFIED_MIN_VOLUME_ETH || 3)
-      let rows = listCollections().map(summarize)
+      const ready = dbReadySlugSet()
+      let rows = listCollections()
+        .map(summarize)
+        .filter((r) => ready.has(r.slug))
       rows = [...rows].sort((a, b) => {
         const av = (a.volumeTotal || 0) >= VERIFIED_MIN ? 1 : 0
         const bv = (b.volumeTotal || 0) >= VERIFIED_MIN ? 1 : 0
@@ -302,9 +316,11 @@ const server = http.createServer(async (req, res) => {
         contractAddress: r.contractAddress,
         chain: r.chain || 'robinhood',
         verified: (r.volumeTotal || 0) >= VERIFIED_MIN,
+        ready: true,
       }))
       const stats = {
         collections: rows.length,
+        ready: rows.length,
         listedTotal: rows.reduce((s, r) => s + (r.listedCount || 0), 0),
         volume24h: rows.reduce((s, r) => s + (r.volume24h || 0), 0),
         verified: rows.filter((r) => (r.volumeTotal || 0) >= VERIFIED_MIN)
@@ -321,13 +337,14 @@ const server = http.createServer(async (req, res) => {
         200,
         {
           generatedAt: new Date().toISOString(),
+          readyOnly: true,
           stats,
           collections: top,
           activity,
           trending: top.slice(0, 12),
           featured: top.slice(0, 6),
         },
-        20
+        12
       )
     }
 

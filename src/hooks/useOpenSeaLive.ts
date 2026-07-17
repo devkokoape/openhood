@@ -1,11 +1,14 @@
 /**
- * Live OpenSea Robinhood data — Fly-first, memory-capped.
+ * Live OpenSea Robinhood data — Fly-first, memory-capped, ready-only.
  *
- * Heavy paths (full 1000+ collection discovery every few minutes) were
- * OOMing phones. We now:
- *  - Prefer Fly catalog (already filtered mainnet markets)
+ * Public marketplace shows ONLY fully downloaded (ready) collections from Fly.
+ * When a collection finishes download/enrich on the indexer, the next poll
+ * picks it up automatically — no manual publish step.
+ *
+ *  - Prefer Fly catalog (server already filters readyOnly)
  *  - Cap how many collections live in React state
- *  - Poll stats slowly; skip OpenSea mass-discovery when Fly is available
+ *  - Poll often enough for new ready collections to appear (~45–90s)
+ *  - Skip OpenSea mass-discovery / seed stubs when Fly is available
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Activity, Collection } from '../types'
@@ -34,10 +37,11 @@ import {
   statsPollMs,
 } from '../lib/device'
 
-/** Re-discover catalog (Fly-first) */
-export const DISCOVER_INTERVAL_MS = preferLiteMode()
-  ? 30 * 60_000
-  : 15 * 60_000
+/**
+ * Re-poll Fly ready catalog so collections auto-appear after 100% download.
+ * Faster than full OpenSea rediscovery; still gentle on mobile.
+ */
+export const DISCOVER_INTERVAL_MS = preferLiteMode() ? 90_000 : 45_000
 
 export type OpenSeaLiveStatus = {
   live: boolean
@@ -150,6 +154,7 @@ function capCollections(list: Collection[], max: number): Collection[] {
 }
 
 export function useOpenSeaLive() {
+  // Seed snapshot only used when Fly indexer is unreachable (dev offline)
   const seed = useMemo(() => collectionsFromOpenSeaSnapshot(), [])
   const seedSlugs = useMemo(() => robinhoodOpenSeaSlugs(), [])
   const [discovered, setDiscovered] = useState<Collection[]>([])
@@ -166,13 +171,19 @@ export function useOpenSeaLive() {
     usingProxy: openSeaBaseUrl().startsWith('/'),
     hasApiKey: hasOpenSeaApiKey(),
     refreshing: false,
-    discovered: seed.length,
+    discovered: 0,
   })
   const busy = useRef(false)
   const eventsBusy = useRef(false)
   const discoverBusy = useRef(false)
 
   const catalog = useMemo(() => {
+    // Fly is source of truth — only ready collections from the indexer.
+    // Never merge seed stubs (incomplete / not fully downloaded).
+    if (hasIndexerUrl()) {
+      return capCollections(indexerCols, maxDiscoverCollections())
+    }
+    // Offline / no indexer: fall back to local seed + discovery
     let list = mergeBySlug(seed, discovered)
     list = mergeBySlug(list, indexerCols)
     return capCollections(list, maxDiscoverCollections())
@@ -191,28 +202,33 @@ export function useOpenSeaLive() {
       const max = maxDiscoverCollections()
       const lite = preferLiteMode()
 
-      // Fly-only discovery when indexer is available (OpenSea/ME style: thin server feed)
+      // Fly ready-only feed (server filters incomplete downloads)
       if (hasIndexerUrl()) {
-        // Prefer dedicated home feed (pre-ranked, small payload)
         const { fetchHomeFeed } = await import('../lib/indexerApi')
         const home = await fetchHomeFeed(max)
-        if (home?.collections?.length) {
-          setIndexerCols(home.collections.map(indexerRowToCollection))
+        if (home) {
+          const cols = (home.collections || []).map(indexerRowToCollection)
+          setIndexerCols(cols)
+          setDiscovered([]) // drop any non-ready OS discovery
           setStatus((s) => ({
             ...s,
-            discovered: home.collections.length,
+            discovered: cols.length,
             live: true,
             lastOkAt: Date.now(),
+            lastError: null,
           }))
         } else {
           const rows = await fetchIndexerCollections({ limit: max })
-          if (rows?.length) {
-            setIndexerCols(rows.map(indexerRowToCollection))
+          if (rows) {
+            const cols = rows.map(indexerRowToCollection)
+            setIndexerCols(cols)
+            setDiscovered([])
             setStatus((s) => ({
               ...s,
-              discovered: rows.length,
+              discovered: cols.length,
               live: true,
               lastOkAt: Date.now(),
+              lastError: null,
             }))
           }
         }

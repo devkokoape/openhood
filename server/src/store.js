@@ -15,6 +15,7 @@ import {
   ensureDataDir,
   getDb,
   getDbPath,
+  invalidateReadySlugCache,
   metaGet,
   metaGetAll,
   metaSet,
@@ -152,6 +153,8 @@ export function putCollection(slug, row) {
   dbUpsertCollection(next)
   dbReplaceNfts(slug, nfts, next.collectionId)
   collectionCache.set(slug, next)
+  // Content readiness may change after sync/enrich writes
+  invalidateReadySlugCache()
   return next
 }
 
@@ -161,6 +164,7 @@ export function patchCollectionNfts(slug, patchesByToken) {
     // Reload cache
     const full = dbGetCollection(slug, { includeNfts: true })
     if (full) collectionCache.set(slug, full)
+    invalidateReadySlugCache()
   }
   return getCollection(slug)
 }
