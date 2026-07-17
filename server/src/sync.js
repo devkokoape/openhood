@@ -143,10 +143,10 @@ export function defaultSlugs() {
 }
 
 /**
- * Discover every Robinhood collection on OpenSea and queue meta sync for new ones.
- * Call on boot + periodically so new RH collections appear automatically.
+ * Discover every Robinhood collection on OpenSea and optionally queue meta sync.
+ * @param {{ enqueueNew?: boolean }} opts enqueueNew=false seeds shells only (no queue flood)
  */
-export async function discoverPass() {
+export async function discoverPass({ enqueueNew = true } = {}) {
   try {
     const rows = await fetchAllRobinhoodCollections({ maxPages: 40, pageSize: 100 })
     if (!rows.length) {
@@ -189,12 +189,13 @@ export async function discoverPass() {
         indexPhase: 'discovered',
       })
       seeded++
-      // Queue meta (listings) — priority first
-      const isPriority = PRIORITY_SLUGS.includes(r.slug)
-      enqueueSync(r.slug, { full: false, front: isPriority })
+      if (enqueueNew) {
+        const isPriority = PRIORITY_SLUGS.includes(r.slug)
+        enqueueSync(r.slug, { full: false, front: isPriority })
+      }
     }
     console.log(
-      `[discover] ${discoveredSlugs.length} RH collections, seeded ${seeded} new shells`
+      `[discover] ${discoveredSlugs.length} RH collections, seeded ${seeded} new shells (enqueueNew=${enqueueNew})`
     )
     return discoveredSlugs
   } catch (e) {
@@ -251,47 +252,91 @@ export function queueDepth() {
 /**
  * Admin: queue OpenSea → Fly download for many collections.
  * mode:
- *  - all: discover RH + full sync every slug
- *  - missing: full sync only empty / stub-heavy collections
- *  - meta: listings only (faster), then enrich pass fills art
+ *  - all / meta: discover RH + **listings-only** for every slug (fast, usable books)
+ *  - enrich: full art/traits only for collections that already have listings but stubs
+ *  - missing: meta for empty books + full for stub-heavy ones with listings
+ *
+ * Never dumps 1000+ full enrich jobs in one click — that looked "broken" (queue stuck for hours).
  */
 export async function downloadAllContent({ mode = 'all' } = {}) {
+  const beforeQ = queueDepth()
+
+  // If already a big backlog, don't pile on — report status instead
+  if (beforeQ > 80 && mode !== 'enrich') {
+    return {
+      ok: true,
+      mode,
+      discovered: 0,
+      slugCount: defaultSlugs().length,
+      queued: 0,
+      queueDepth: beforeQ,
+      busy: isSyncBusy(),
+      alreadyRunning: true,
+      message: `Download already in progress — queue has ${beforeQ} jobs. Wait for it to drain (watch Content status).`,
+    }
+  }
+
   let discovered = 0
   try {
-    const slugs = await discoverPass()
-    discovered = slugs?.length || 0
+    // Seed shells only — do not auto-enqueue here (we queue intentionally below)
+    const slugsFound = await discoverPass({ enqueueNew: false })
+    discovered = slugsFound?.length || 0
   } catch (e) {
     console.error('[download] discover', e?.message || e)
   }
 
   const slugs = defaultSlugs()
   let queued = 0
-  const full = mode !== 'meta'
+  let metaQueued = 0
+  let fullQueued = 0
 
-  if (mode === 'missing') {
+  if (mode === 'enrich') {
+    // Art + traits for collections that already have a book but mostly stubs
+    const cols = listCollections()
+      .map((c) => {
+        const nfts = c.nfts || []
+        const listed = nfts.length || c.listedCount || 0
+        const stubs = nfts.filter((n) => isPlaceholderImage(n.image)).length
+        return { slug: c.slug, listed, stubs }
+      })
+      .filter((c) => c.listed > 0 && c.stubs > Math.max(3, c.listed * 0.15))
+      .sort((a, b) => b.listed - a.listed)
+
+    // Cap so one click can't freeze the box for a day
+    const cap = Number(process.env.ENRICH_QUEUE_CAP || 40)
+    for (const c of cols.slice(0, cap)) {
+      enqueueSync(c.slug, { full: true, front: PRIORITY_SLUGS.includes(c.slug) })
+      fullQueued++
+      queued++
+    }
+  } else if (mode === 'missing') {
     for (const slug of slugs) {
       const c = getCollection(slug)
       const nfts = c?.nfts || []
-      const stubs = nfts.filter(
-        (n) => isPlaceholderImage(n.image) || !hasRealTraits(n.traits)
-      ).length
-      const needs =
-        !c ||
-        !nfts.length ||
-        stubs > Math.max(5, nfts.length * 0.25)
-      if (!needs) continue
-      enqueueSync(slug, { full: true })
-      queued++
+      if (!c || !nfts.length) {
+        enqueueSync(slug, { full: false }) // listings first
+        metaQueued++
+        queued++
+        continue
+      }
+      const stubs = nfts.filter((n) => isPlaceholderImage(n.image)).length
+      if (stubs > Math.max(5, nfts.length * 0.35)) {
+        enqueueSync(slug, { full: true })
+        fullQueued++
+        queued++
+      }
     }
   } else {
-    // Priority first for better UX while full chain queues
+    // all / meta — FAST path: listings + stats for whole chain
     for (const slug of PRIORITY_SLUGS) {
-      enqueueSync(slug, { full, front: true })
+      enqueueSync(slug, { full: false, front: true })
+      metaQueued++
       queued++
     }
     for (const slug of slugs) {
       if (PRIORITY_SLUGS.includes(slug)) continue
-      enqueueSync(slug, { full })
+      enqueueSync(slug, { full: false })
+      metaQueued++
       queued++
     }
   }
@@ -302,17 +347,25 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
     lastDownloadQueued: queued,
   })
 
+  const q = queueDepth()
+  let message =
+    mode === 'enrich'
+      ? `Queued ${fullQueued} collections for art/traits enrich (cap applied). Queue depth ${q}.`
+      : mode === 'missing'
+        ? `Queued ${metaQueued} listing fills + ${fullQueued} art enriches. Queue depth ${q}.`
+        : `Queued ${metaQueued} collections for listings download (OpenSea → Fly). Art fills in background. Queue depth ${q}.`
+
   return {
     ok: true,
     mode,
     discovered,
     slugCount: slugs.length,
     queued,
-    queueDepth: queueDepth(),
+    metaQueued,
+    fullQueued,
+    queueDepth: q,
     busy: isSyncBusy(),
-    message: full
-      ? `Queued ${queued} collections for full OpenSea → Fly download (listings + art + traits). Runs in background.`
-      : `Queued ${queued} collections for listings-only (meta) download.`,
+    message,
   }
 }
 

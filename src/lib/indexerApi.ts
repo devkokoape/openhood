@@ -292,28 +292,26 @@ export async function fetchContentStatus(): Promise<ContentStatusPayload | null>
 }
 
 function adminAuthHeaders(): HeadersInit {
+  // Match AdminGate defaults so Pages works even without CI secrets
   const key = (
     (import.meta.env.VITE_ADMIN_PASS as string | undefined) ||
     (import.meta.env.VITE_SYNC_SECRET as string | undefined) ||
-    ''
+    'MRkoko2025'
   ).trim()
-  const h: Record<string, string> = {
+  return {
     accept: 'application/json',
     'content-type': 'application/json',
+    'x-admin-key': key,
+    'x-sync-secret': key,
   }
-  if (key) {
-    h['x-admin-key'] = key
-    h['x-sync-secret'] = key
-  }
-  return h
 }
 
 /**
  * Trigger OpenSea → Fly bulk download (queued on server).
- * mode: all | missing | meta
+ * mode: all | meta = listings for all · missing = empty/stub · enrich = art fill
  */
 export async function triggerContentDownload(
-  mode: 'all' | 'missing' | 'meta' = 'all'
+  mode: 'all' | 'missing' | 'meta' | 'enrich' = 'all'
 ): Promise<{
   ok?: boolean
   error?: string
@@ -323,16 +321,23 @@ export async function triggerContentDownload(
   discovered?: number
   slugCount?: number
   mode?: string
+  alreadyRunning?: boolean
+  metaQueued?: number
+  fullQueued?: number
 } | null> {
   const base = baseUrl()
   if (!base) return null
   try {
+    const controller = new AbortController()
+    const t = window.setTimeout(() => controller.abort(), 120_000)
     const res = await fetch(`${base}/v1/content/download`, {
       method: 'POST',
       headers: adminAuthHeaders(),
       body: JSON.stringify({ mode }),
       cache: 'no-store',
+      signal: controller.signal,
     })
+    window.clearTimeout(t)
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
     if (!res.ok) {
       return {
@@ -341,7 +346,11 @@ export async function triggerContentDownload(
         message: data.message ? String(data.message) : undefined,
       }
     }
-    return data as {
+    return {
+      ok: true,
+      ...data,
+      message: data.message ? String(data.message) : undefined,
+    } as {
       ok?: boolean
       message?: string
       queued?: number
@@ -349,11 +358,19 @@ export async function triggerContentDownload(
       discovered?: number
       slugCount?: number
       mode?: string
+      alreadyRunning?: boolean
+      metaQueued?: number
+      fullQueued?: number
     }
   } catch (e) {
     return {
       ok: false,
-      error: e instanceof Error ? e.message : 'network error',
+      error:
+        e instanceof Error
+          ? e.name === 'AbortError'
+            ? 'Request timed out — server may still be discovering collections. Refresh status.'
+            : e.message
+          : 'network error',
     }
   }
 }

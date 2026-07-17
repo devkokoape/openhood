@@ -401,7 +401,7 @@ export function AdminPage() {
   }, [tab, loadContentStatus])
 
   const runDownload = useCallback(
-    async (mode: 'all' | 'missing' | 'meta') => {
+    async (mode: 'all' | 'missing' | 'meta' | 'enrich') => {
       setDownloadBusy(true)
       setDownloadMsg(null)
       try {
@@ -409,16 +409,19 @@ export function AdminPage() {
         if (!res?.ok && res?.error) {
           setDownloadMsg(
             res.error === 'unauthorized'
-              ? 'Unauthorized — set ADMIN_PASS on Fly to match your admin password, then retry.'
+              ? 'Unauthorized — Fly ADMIN_PASS must match the admin login password.'
               : res.error
           )
         } else {
           setDownloadMsg(
             res?.message ||
-              `Queued ${res?.queued ?? 0} collections (queue depth ${res?.queueDepth ?? '—'})`
+              `Queued ${res?.queued ?? 0} collections · queue ${res?.queueDepth ?? '—'}`
           )
         }
+        // Poll status a few times so the user sees the queue move
         await loadContentStatus()
+        window.setTimeout(() => void loadContentStatus(), 3000)
+        window.setTimeout(() => void loadContentStatus(), 10000)
         void loadDashboard({ silent: true })
       } catch (e) {
         setDownloadMsg(e instanceof Error ? e.message : 'Download failed')
@@ -641,10 +644,20 @@ export function AdminPage() {
                   variant="outline"
                   disabled={downloadBusy}
                   onClick={() => void runDownload('missing')}
-                  title="Only collections missing listings or mostly stubs"
+                  title="Listings for empty collections + art for stub-heavy ones"
                 >
                   <Download className="w-3.5 h-3.5" />
                   Fill missing
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={downloadBusy}
+                  onClick={() => void runDownload('enrich')}
+                  title="Fill real NFT art/traits for collections that already have listings"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Enrich art
                 </Button>
                 <Button
                   size="sm"
@@ -652,7 +665,7 @@ export function AdminPage() {
                   onClick={() => {
                     if (
                       !window.confirm(
-                        'Download ALL Robinhood collections from OpenSea into Fly?\n\nThis queues background jobs (listings + art + traits). Safe to run — users keep using the site while it works.'
+                        'Download listings for ALL Robinhood collections into Fly?\n\nThis is the fast path (prices/items first). Art fills with “Enrich art” or automatically in the background.\n\nSafe to leave open — works in the background.'
                       )
                     ) {
                       return
@@ -663,10 +676,46 @@ export function AdminPage() {
                   <CloudDownload
                     className={clsx('w-3.5 h-3.5', downloadBusy && 'animate-pulse')}
                   />
-                  {downloadBusy ? 'Queueing…' : 'Download all → Fly'}
+                  {downloadBusy ? 'Queueing…' : 'Download listings → Fly'}
                 </Button>
               </div>
             </div>
+
+            {/* Live progress bar */}
+            {content && (content.busy || (content.queueDepth || 0) > 0) && (
+              <div className="rounded-xl border border-hood/25 bg-hood/10 px-3 py-3 space-y-1.5">
+                <div className="flex justify-between text-xs font-bold text-ink">
+                  <span>Download in progress on Fly</span>
+                  <span className="tabular-nums text-hood">
+                    queue {content.queueDepth ?? 0}
+                    {content.busy ? ' · working' : ''}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-surface-3 overflow-hidden">
+                  <div
+                    className="h-full bg-hood transition-all duration-500"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.max(
+                          4,
+                          100 -
+                            Math.min(
+                              100,
+                              ((content.queueDepth || 0) / Math.max(content.summary.collections || 1, 1)) *
+                                100
+                            )
+                        )
+                      )}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-[11px] text-ink-3">
+                  Queue goes down as each collection finishes. Refresh status to update numbers.
+                  “With listings” and “Art enrich %” should rise over time.
+                </p>
+              </div>
+            )}
 
             {downloadMsg && (
               <div className="rounded-xl border border-hood/30 bg-hood/10 px-3 py-2 text-sm text-ink">
