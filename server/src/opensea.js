@@ -224,7 +224,7 @@ export function mapOffers(collectionId, rows) {
   return out.sort((a, b) => b.price - a.price)
 }
 
-export function listingsToNfts(listings, collectionId, { name = '', image = '' } = {}) {
+export function listingsToNfts(listings, collectionId, { name = '' } = {}) {
   const byToken = new Map()
   for (const L of listings) {
     const prev = byToken.get(L.tokenId)
@@ -233,14 +233,13 @@ export function listingsToNfts(listings, collectionId, { name = '', image = '' }
   const out = []
   for (const L of byToken.values()) {
     const tid = Number(L.tokenId)
+    // Always stub with dicebear — never collection logo (that blocks enrich detection)
     out.push({
       id: `${collectionId}-os-${L.tokenId}`,
       tokenId: Number.isSafeInteger(tid) ? tid : parseInt(L.tokenId, 10) || 0,
       name: name ? `${name} #${L.tokenId}` : `#${L.tokenId}`,
       collectionId,
-      image:
-        image ||
-        `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${L.tokenId}&backgroundColor=0b0e11,00c805`,
+      image: `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${L.tokenId}&backgroundColor=0b0e11,00c805`,
       owner: L.seller || 'unknown',
       listed: true,
       price: L.priceEth,
@@ -252,6 +251,63 @@ export function listingsToNfts(listings, collectionId, { name = '', image = '' }
   }
   out.sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
   return out
+}
+
+function isPlaceholderImage(image) {
+  if (!image) return true
+  if (String(image).includes('dicebear')) return true
+  if (/image_type_(logo|hero|featured)/i.test(image)) return true
+  if (/\/collection\/[^/]+\/image_type_/i.test(image)) return true
+  return false
+}
+
+/**
+ * Page OpenSea collection NFT catalog (50/req) and merge real art/names onto listed tokens.
+ * Much faster than 1 request per NFT.
+ */
+export async function fillListedFromCatalog(slug, nfts, collectionId, { maxPages = 120 } = {}) {
+  const byToken = new Map(nfts.map((n) => [String(n.tokenId), { ...n }]))
+  const needed = new Set(
+    nfts
+      .filter((n) => isPlaceholderImage(n.image) || !n.name || String(n.name).startsWith('#'))
+      .map((n) => String(n.tokenId))
+  )
+  if (!needed.size) return nfts
+
+  let next = undefined
+  for (let page = 0; page < maxPages && needed.size > 0; page++) {
+    let path = `/collection/${encodeURIComponent(slug)}/nfts?limit=50`
+    if (next) path += `&next=${encodeURIComponent(next)}`
+    const data = await openSeaGet(path)
+    const rows = data?.nfts || []
+    if (!rows.length) break
+    for (const raw of rows) {
+      const tid = raw.identifier != null ? String(raw.identifier) : ''
+      if (!tid || !needed.has(tid)) continue
+      const existing = byToken.get(tid)
+      if (!existing) continue
+      const image = raw.image_url || raw.display_image_url || existing.image
+      const traits = (raw.traits || [])
+        .filter((t) => t.trait_type != null && t.value != null)
+        .map((t) => ({ trait_type: String(t.trait_type), value: String(t.value) }))
+      byToken.set(tid, {
+        ...existing,
+        name: raw.name || existing.name,
+        image,
+        owner: raw.owners?.[0]?.address?.toLowerCase() || existing.owner,
+        traits: traits.length > 2 ? traits : existing.traits,
+        rarityRank: raw.rarity?.rank ?? existing.rarityRank,
+      })
+      needed.delete(tid)
+    }
+    next = data?.next
+    if (!next) break
+    await sleep(40)
+  }
+  console.log(
+    `[catalog-fill] ${slug}: filled ${nfts.length - needed.size}/${nfts.length}, remaining stubs ${needed.size}`
+  )
+  return Array.from(byToken.values()).sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
 }
 
 export async function enrichImages(nfts, listings, { chain = 'robinhood', concurrency = 8, limit = 80 } = {}) {

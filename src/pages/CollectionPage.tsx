@@ -186,12 +186,14 @@ export function CollectionPage() {
     return nfts.filter((n) => n.collectionId === collection.id)
   }, [collection, nfts, openSeaNfts.nfts])
 
-  // Progressive art for deep-scroll listings (placeholders → real images)
+  // Progressive art for remaining placeholders (bulk catalog pages + per-token)
   useVisibleNftEnrich(collectionNfts, {
-    enabled: Boolean(isOpenSeaCol && collection?.contractAddress),
+    enabled: Boolean(isOpenSeaCol && collection),
+    slug: collection?.slug,
     collectionId: collection?.id,
     contractAddress: collection?.contractAddress,
     chain: collection?.chain || 'robinhood',
+    collectionImage: collection?.image,
     onPatch: openSeaNfts.replaceNfts,
   })
 

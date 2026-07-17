@@ -769,6 +769,31 @@ export function parseListingRow(L: OpenSeaListingRow): ParsedListing | null {
   }
 }
 
+/** True when image is not real token art (logo / placeholder / missing). */
+export function isPlaceholderNftImage(
+  image?: string | null,
+  collectionImage?: string | null
+): boolean {
+  if (!image) return true
+  if (image.includes('dicebear')) return true
+  if (collectionImage && image === collectionImage) return true
+  // Collection-level OpenSea assets, not per-token art
+  if (/image_type_(logo|hero|featured)/i.test(image)) return true
+  if (/\/collection\/[^/]+\/image_type_/i.test(image)) return true
+  return false
+}
+
+export function nftNeedsMetadata(
+  n: Nft,
+  collectionImage?: string | null
+): boolean {
+  if (isPlaceholderNftImage(n.image, collectionImage)) return true
+  if (!n.name || n.name.startsWith('#')) return true
+  // Generic "CollectionName #id" without real OS name is OK to refine later;
+  // only force if still placeholder image.
+  return false
+}
+
 /** Build listed NFT cards from best-listings (marketplace inventory). */
 export function nftsFromListings(
   listings: ParsedListing[],
@@ -786,9 +811,10 @@ export function nftsFromListings(
     const tokenIdNum = Number(L.tokenId)
     const id = openSeaNftId(collectionId, L.tokenId)
     const cached = nftCache.get(id)
-    const fallback =
-      opts?.fallbackImage ||
-      `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${L.tokenId}&backgroundColor=0b0e11,00c805`
+    // Never use collection logo as token art — it blocks enrich detection
+    const stub = `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${L.tokenId}&backgroundColor=0b0e11,00c805`
+    const cachedOk =
+      cached?.image && !isPlaceholderNftImage(cached.image, opts?.fallbackImage)
 
     out.push({
       id,
@@ -797,7 +823,7 @@ export function nftsFromListings(
         : parseInt(L.tokenId, 10) || 0,
       name: cached?.name || `${opts?.namePrefix || '#'}${L.tokenId}`,
       collectionId,
-      image: cached?.image && !cached.image.includes('dicebear') ? cached.image : fallback,
+      image: cachedOk ? cached!.image : stub,
       owner: L.seller || cached?.owner || 'unknown',
       listed: true,
       price: L.priceEth,
@@ -814,6 +840,89 @@ export function nftsFromListings(
   // Floor-first like OpenSea
   out.sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
   return out
+}
+
+/**
+ * Fill real names/images/traits for listed tokens by paging
+ * GET /collection/{slug}/nfts (50/page) — far fewer calls than 1 NFT at a time.
+ */
+export async function fillListedNftMetadata(
+  slug: string,
+  collectionId: string,
+  listed: Nft[],
+  opts?: {
+    maxPages?: number
+    collectionImage?: string | null
+    signal?: { cancelled: boolean }
+    onProgress?: (nfts: Nft[]) => void
+  }
+): Promise<Nft[]> {
+  if (!listed.length) return listed
+  const byToken = new Map(listed.map((n) => [String(n.tokenId), { ...n }]))
+  const needed = new Set(
+    listed
+      .filter((n) => nftNeedsMetadata(n, opts?.collectionImage))
+      .map((n) => String(n.tokenId))
+  )
+  if (needed.size === 0) return listed
+
+  let next: string | null = null
+  const maxPages = opts?.maxPages ?? 150
+
+  for (let page = 0; page < maxPages && needed.size > 0; page++) {
+    if (opts?.signal?.cancelled) break
+    const res = await fetchOpenSeaCollectionNftsPage(slug, {
+      limit: 50,
+      next,
+    })
+    if (!res.nfts.length) break
+
+    let hit = 0
+    for (const raw of res.nfts) {
+      const tid = raw.identifier != null ? String(raw.identifier) : ''
+      if (!tid || !needed.has(tid)) continue
+      const existing = byToken.get(tid)
+      if (!existing) continue
+      const mapped = mapOpenSeaNftToNft(raw, collectionId)
+      if (!mapped) continue
+      const image = pickBestNftImage(raw)
+      byToken.set(tid, {
+        ...existing,
+        name: mapped.name || existing.name,
+        image: image || mapped.image || existing.image,
+        owner:
+          mapped.owner && mapped.owner !== 'unknown'
+            ? mapped.owner
+            : existing.owner,
+        traits:
+          mapped.traits && mapped.traits.length > 2
+            ? mapped.traits
+            : existing.traits,
+        rarityRank: mapped.rarityRank ?? existing.rarityRank,
+        listed: existing.listed,
+        price: existing.price,
+      })
+      needed.delete(tid)
+      hit++
+    }
+
+    if (hit > 0 || page % 3 === 0) {
+      const snapshot = Array.from(byToken.values()).sort(
+        (a, b) => (a.price ?? 0) - (b.price ?? 0)
+      )
+      cacheOpenSeaNfts(snapshot)
+      opts?.onProgress?.(snapshot)
+    }
+
+    next = res.next
+    if (!next) break
+    // stay friendly to rate limits
+    await new Promise((r) => setTimeout(r, 40))
+  }
+
+  return Array.from(byToken.values()).sort(
+    (a, b) => (a.price ?? 0) - (b.price ?? 0)
+  )
 }
 
 /** Page of NFTs for a collection slug (max 50 per request). */

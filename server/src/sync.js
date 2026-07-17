@@ -8,6 +8,7 @@ import {
   fetchCollectionEvents,
   fetchCollectionOffers,
   fetchCollectionStats,
+  fillListedFromCatalog,
   listingsToNfts,
   mapEvents,
   mapOffers,
@@ -80,9 +81,17 @@ export async function syncSlug(slug) {
   const owners = stats?.total?.num_owners ?? 0
   const items = colMeta?.total_supply || colMeta?.unique_item_count || 0
 
-  let nfts = listingsToNfts(listings, collectionId, { name, image })
-  // Enrich a large batch on every sync (rest filled by background enrich loop)
-  const enrichLimit = Number(process.env.ENRICH_LIMIT || 250)
+  let nfts = listingsToNfts(listings, collectionId, { name })
+  // 1) Bulk fill from collection NFT catalog (50 tokens per request)
+  try {
+    nfts = await fillListedFromCatalog(slug, nfts, collectionId, {
+      maxPages: Number(process.env.CATALOG_FILL_PAGES || 120),
+    })
+  } catch (e) {
+    console.warn(`[sync] catalog-fill ${slug}`, e?.message || e)
+  }
+  // 2) Individual OpenSea NFT calls for whatever is still a placeholder
+  const enrichLimit = Number(process.env.ENRICH_LIMIT || 150)
   try {
     nfts = await enrichImages(nfts, listings, {
       chain: colMeta?.contracts?.[0]?.chain || 'robinhood',
