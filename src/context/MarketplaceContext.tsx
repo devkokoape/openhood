@@ -37,7 +37,10 @@ import {
   useOpenSeaLive,
   type OpenSeaLiveStatus,
 } from '../hooks/useOpenSeaLive'
+import { useMainnetIndexer } from '../hooks/useMainnetIndexer'
+import { withRisk } from '../lib/indexer'
 import type { ChainAuction, ChainListing } from '../lib/marketplace'
+import type { IndexerReport } from '../types'
 
 interface MarketplaceCtx {
   user: string
@@ -75,6 +78,14 @@ interface MarketplaceCtx {
   chainAuctions: ChainAuction[]
   /** OpenSea live poll status */
   openSeaStatus: OpenSeaLiveStatus
+  /** Mainnet indexer report (admin) */
+  indexerReport: IndexerReport
+  indexerLoading: boolean
+  indexerError: string | null
+  indexerLastScanAt: string | null
+  rescanIndexer: () => Promise<void>
+  mainnetTokenCount: number
+  verifiedMinVolumeEth: number
 }
 
 const MarketplaceContext = createContext<MarketplaceCtx | null>(null)
@@ -117,33 +128,28 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const actor = connected && address ? actorId(address) : ''
   const user = actor && address ? formatAddress(address) : ''
 
-  const collections = useMemo(() => {
+  /** Pre-index catalog (OpenSea + demo + OpenHood testnet) */
+  const baseCollections = useMemo(() => {
     void tick
-    // Live OpenSea Robinhood collections (polled every second)
     const liveOs = openSeaCollections
-    // Local demo collections only (not OpenSea snapshot)
     const demoLocal = seedCollections.filter((c) => c.source !== 'opensea')
 
     let list: Collection[] = [...liveOs, ...demoLocal]
 
     if (chainEnabled && isMarketplaceDeployed()) {
-      const liveChain: Collection = {
+      const liveChain: Collection = withRisk({
         ...onChainMeta,
         ...collectionPatch,
         volume24h: chainVolume.volume24h,
         volumeTotal: chainVolume.volumeTotal,
         salesTotal: chainVolume.salesTotal,
         intervals: chainVolume.intervals,
-      }
+        source: 'demo',
+      })
       list = [liveChain, ...list.filter((c) => c.id !== ONCHAIN_COLLECTION_ID)]
     }
 
-    // Stable sort: on-chain first, then by 24h volume
-    return list.sort((a, b) => {
-      if (a.id === ONCHAIN_COLLECTION_ID) return -1
-      if (b.id === ONCHAIN_COLLECTION_ID) return 1
-      return b.volume24h - a.volume24h
-    })
+    return list
   }, [
     tick,
     openSeaCollections,
@@ -152,6 +158,29 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
     collectionPatch,
     chainVolume,
   ])
+
+  const {
+    indexedCollections,
+    report: indexerReport,
+    loading: indexerLoading,
+    error: indexerError,
+    lastScanAt: indexerLastScanAt,
+    scan: rescanIndexer,
+    mainnetTokenCount,
+    verifiedMinVolumeEth,
+  } = useMainnetIndexer(baseCollections)
+
+  const collections = useMemo(() => {
+    const riskOrder = { verified: 0, demo: 1, high_risk: 2, trash: 3 } as const
+    return [...indexedCollections].sort((a, b) => {
+      if (a.id === ONCHAIN_COLLECTION_ID) return -1
+      if (b.id === ONCHAIN_COLLECTION_ID) return 1
+      const ra = riskOrder[a.risk || 'trash'] ?? 3
+      const rb = riskOrder[b.risk || 'trash'] ?? 3
+      if (ra !== rb) return ra - rb
+      return b.volume24h - a.volume24h
+    })
+  }, [indexedCollections])
 
   const nfts = useMemo(() => {
     void tick
@@ -394,6 +423,13 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         chainListings,
         chainAuctions,
         openSeaStatus,
+        indexerReport,
+        indexerLoading,
+        indexerError,
+        indexerLastScanAt,
+        rescanIndexer,
+        mainnetTokenCount,
+        verifiedMinVolumeEth,
       }}
     >
       {children}

@@ -1,22 +1,26 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { BadgeCheck, ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { formatPrice } from '../data/mockData'
+import { RiskBadge } from '../components/nft/RiskBadge'
 import clsx from 'clsx'
+import type { CollectionRisk } from '../types'
 
 type SortKey = 'volume24h' | 'volumeTotal' | 'floorPrice' | 'items' | 'name'
 type SortDir = 'desc' | 'asc'
 
 export function CollectionsPage() {
-  const { collections } = useMarketplace()
+  const { collections, verifiedMinVolumeEth } = useMarketplace()
   const [params] = useSearchParams()
   const [sortKey, setSortKey] = useState<SortKey>('volume24h')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [q, setQ] = useState(() => params.get('q') || '')
+  const [risk, setRisk] = useState<'all' | CollectionRisk>('all')
 
   const sorted = useMemo(() => {
     let list = [...collections]
+    if (risk !== 'all') list = list.filter((c) => c.risk === risk)
     if (q.trim()) {
       const s = q.toLowerCase()
       list = list.filter(
@@ -33,7 +37,7 @@ export function CollectionsPage() {
       return sortDir === 'asc' ? cmp : -cmp
     })
     return list
-  }, [collections, sortKey, sortDir, q])
+  }, [collections, sortKey, sortDir, q, risk])
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
@@ -54,11 +58,12 @@ export function CollectionsPage() {
 
   return (
     <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-4">
         <div>
           <h1 className="text-2xl font-bold text-ink">Collections</h1>
           <p className="text-sm text-ink-2 mt-0.5">
-            All collections ranked by trading volume on OpenHood.
+            Verified = OpenSea + ≥{verifiedMinVolumeEth} ETH total volume. Others marked high
+            risk or trash by the indexer.
           </p>
         </div>
         <input
@@ -67,6 +72,24 @@ export function CollectionsPage() {
           placeholder="Filter collections…"
           className="h-10 w-full sm:w-64 px-3 rounded-xl bg-surface-2 border border-edge text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:border-hood"
         />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {(['all', 'verified', 'high_risk', 'trash', 'demo'] as const).map((r) => (
+          <button
+            key={r}
+            type="button"
+            onClick={() => setRisk(r)}
+            className={clsx(
+              'px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors',
+              risk === r
+                ? 'bg-hood text-[#0b0e11]'
+                : 'border border-edge bg-surface-2 text-ink-3 hover:text-ink'
+            )}
+          >
+            {r === 'all' ? 'All' : r.replace('_', ' ')}
+          </button>
+        ))}
       </div>
 
       {/* Mobile card list */}
@@ -86,7 +109,7 @@ export function CollectionsPage() {
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-ink truncate flex items-center gap-1 text-sm">
                 {c.name}
-                {c.verified && <BadgeCheck className="w-3.5 h-3.5 text-hood shrink-0" />}
+                <RiskBadge risk={c.risk} compact className="!text-[9px] !px-1.5" />
               </div>
               <div className="text-[11px] text-ink-3 mt-0.5 tabular-nums">
                 Floor{' '}
@@ -192,11 +215,9 @@ export function CollectionsPage() {
                         alt=""
                         className="w-10 h-10 rounded-lg object-cover shrink-0"
                       />
-                      <span className="font-medium text-ink group-hover:text-hood truncate flex items-center gap-1">
+                      <span className="font-medium text-ink group-hover:text-hood truncate flex items-center gap-1.5">
                         {c.name}
-                        {c.verified && (
-                          <BadgeCheck className="w-3.5 h-3.5 text-hood shrink-0" />
-                        )}
+                        <RiskBadge risk={c.risk} compact />
                       </span>
                     </Link>
                   </td>

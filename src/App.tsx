@@ -18,6 +18,7 @@ import { DegenOverview } from './pages/DegenOverview'
 import { DegenMintsPage } from './pages/DegenMintsPage'
 import { MintPage } from './pages/MintPage'
 import { RankingsPage } from './pages/RankingsPage'
+import { AdminPage } from './pages/AdminPage'
 
 export default function App() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
 
                   <Route path="profile" element={<ProfilePage />} />
                   <Route path="profile/:address" element={<ProfilePage />} />
+                  <Route path="admin" element={<AdminPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>
               </Routes>

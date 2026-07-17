@@ -40,6 +40,7 @@ import { ONCHAIN_COLLECTION_ID, parseOnChainTokenId } from '../lib/marketplace'
 import { useMarketplaceTx } from '../hooks/useOnChainMarket'
 import { useOpenSeaCollectionNfts } from '../hooks/useOpenSeaCollectionNfts'
 import { TxToast } from '../components/wallet/TxToast'
+import { RiskBadge } from '../components/nft/RiskBadge'
 
 type SortKey = 'price_asc' | 'price_desc' | 'id' | 'rarity_asc' | 'rarity_desc'
 type GridSize = 'sm' | 'md' | 'lg'
@@ -473,10 +474,13 @@ export function CollectionPage() {
               <div className="min-w-0">
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-ink tracking-tight flex items-center gap-2 flex-wrap">
                   {collection.name}
-                  {collection.verified && (
-                    <BadgeCheck className="w-6 h-6 text-hood shrink-0 sm:hidden" />
-                  )}
+                  <RiskBadge risk={collection.risk} />
                 </h1>
+                {collection.riskReasons && collection.riskReasons.length > 0 && (
+                  <p className="text-[11px] text-ink-3 mt-1 max-w-xl">
+                    {collection.riskReasons[0]}
+                  </p>
+                )}
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-3">
                   <span>
                     by{' '}

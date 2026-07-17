@@ -13,6 +13,15 @@ export interface OpenSeaIntervals {
   salesTotal: number
 }
 
+/**
+ * Indexer risk tier for Robinhood Chain collections.
+ * - verified: OpenSea-listed + ≥3 ETH lifetime volume
+ * - high_risk: OpenSea low-volume or thin mainnet activity
+ * - trash: unindexed / spam-like / no meaningful volume
+ * - demo: OpenHood local/testnet demo surface
+ */
+export type CollectionRisk = 'verified' | 'high_risk' | 'trash' | 'demo'
+
 export interface Collection {
   id: string
   name: string
@@ -29,7 +38,12 @@ export interface Collection {
   website?: string
   twitter?: string
   discord?: string
+  /** True only when risk === 'verified' (OpenSea + ≥3 ETH total volume) */
   verified: boolean
+  /** Indexer risk classification */
+  risk?: CollectionRisk
+  /** Human-readable reasons from the problem detector */
+  riskReasons?: string[]
   /** OpenSea analytics (from API / snapshot) */
   openseaUrl?: string
   chain?: string
@@ -38,7 +52,40 @@ export interface Collection {
   listedPct?: number
   category?: string
   intervals?: OpenSeaIntervals
-  source?: 'opensea' | 'demo'
+  source?: 'opensea' | 'demo' | 'mainnet'
+}
+
+/** Admin indexer problem report */
+export type IndexerProblemSeverity = 'critical' | 'warning' | 'info'
+
+export interface IndexerProblem {
+  id: string
+  severity: IndexerProblemSeverity
+  code: string
+  title: string
+  detail: string
+  collectionId?: string
+  collectionName?: string
+  contractAddress?: string
+}
+
+export interface IndexerReport {
+  updatedAt: string
+  chainId: number
+  chainName: string
+  totals: {
+    collections: number
+    verified: number
+    highRisk: number
+    trash: number
+    demo: number
+    mainnetDiscovered: number
+    openseaIndexed: number
+    volumeVerifiedEth: number
+    problems: number
+  }
+  problems: IndexerProblem[]
+  collections: Collection[]
 }
 
 export interface Nft {

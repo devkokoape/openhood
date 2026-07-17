@@ -9,6 +9,7 @@
 
 import type { Activity, Collection, Nft, OpenSeaIntervals } from '../types'
 import snapshot from '../data/opensea-robinhood-snapshot.json'
+import { withRisk } from './indexer'
 
 const OPENSEA_HOST = 'https://api.opensea.io/api/v2'
 
@@ -163,7 +164,7 @@ export function mapOpenSeaToCollection(
     c.image_url || `https://opensea.io/static/images/placeholder.png`
   const banner = c.banner_image_url || image
 
-  return {
+  const base: Collection = {
     id: `${idPrefix}-${row.slug}`,
     name: c.name,
     slug: row.slug || c.collection,
@@ -181,8 +182,8 @@ export function mapOpenSeaToCollection(
     website: c.project_url || undefined,
     twitter: c.twitter_username || undefined,
     discord: c.discord_url || undefined,
-    verified:
-      c.safelist_status === 'verified' || c.safelist_status === 'approved',
+    // verified is set by indexer policy (OpenSea + ≥3 ETH volume), not OS safelist alone
+    verified: false,
     openseaUrl: c.opensea_url || `https://opensea.io/collection/${row.slug}`,
     chain: contract?.chain || 'robinhood',
     contractAddress: contract?.address,
@@ -191,6 +192,7 @@ export function mapOpenSeaToCollection(
     intervals,
     source: 'opensea',
   }
+  return withRisk(base)
 }
 
 /** Slugs we track on Robinhood Chain (from snapshot catalog) */
@@ -372,8 +374,8 @@ export function mergeOpenSeaPatches(
   return base.map((c) => {
     if (c.source !== 'opensea') return c
     const p = patches.get(c.slug)
-    if (!p) return c
-    return { ...c, ...p, id: c.id, slug: c.slug, source: 'opensea' as const }
+    if (!p) return withRisk(c)
+    return withRisk({ ...c, ...p, id: c.id, slug: c.slug, source: 'opensea' as const })
   })
 }
 

@@ -22,6 +22,7 @@ const links = [
   { to: '/rankings', label: 'Rankings', end: false, icon: Activity },
   { to: '/degen', label: 'Degen', end: false, icon: Zap },
   { to: '/activity', label: 'Activity', end: false, icon: Activity },
+  { to: '/admin', label: 'Admin', end: false, icon: Activity },
 ]
 
 export function Navbar() {
