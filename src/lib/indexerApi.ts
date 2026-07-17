@@ -83,3 +83,102 @@ export async function fetchIndexerCollections(): Promise<
   )
   return data?.collections ?? null
 }
+
+/** Full admin dashboard: visits, geo, users, data collection, server */
+export interface AnalyticsDashboard {
+  generatedAt: string
+  server: {
+    startedAt?: string
+    lastFullSyncAt?: string | null
+    lastError?: string | null
+    syncCount?: number
+    collectionCount?: number
+    listedTotal?: number
+    busy?: boolean
+    hasOpenSeaKey?: boolean
+    slugs?: string[]
+    uptimeSec?: number
+    memoryMb?: number
+    node?: string
+    pid?: number
+  }
+  visits: {
+    total: number
+    last24h: number
+    last7d: number
+    uniqueSessions7d: number
+    withWallet7d: number
+    byDay: { date: string; count: number }[]
+    byHour: { hour: string; count: number }[]
+    topPaths: { path: string; count: number }[]
+    topCountries: { name: string; count: number }[]
+    topCities: { name: string; count: number }[]
+    byDevice: { name: string; count: number }[]
+    recent: {
+      id: string
+      at: string
+      path: string
+      wallet?: string | null
+      device?: string
+      locale?: string
+      timezone?: string
+      geo?: {
+        country?: string | null
+        countryCode?: string | null
+        region?: string | null
+        city?: string | null
+        timezone?: string | null
+      }
+      connected?: boolean
+      referrer?: string | null
+    }[]
+  }
+  users: {
+    total: number
+    wallets: number
+    sessions: number
+    activeToday: number
+    recent: {
+      id: string
+      kind: string
+      wallet?: string | null
+      visits: number
+      firstSeen: string
+      lastSeen: string
+      lastPath?: string
+      lastGeo?: {
+        country?: string | null
+        city?: string | null
+        region?: string | null
+        countryCode?: string | null
+      }
+      locale?: string
+      timezone?: string
+      topCountry?: string
+      topDevice?: string
+    }[]
+  }
+  dataCollection: {
+    collectionsIndexed: number
+    listedTotal: number
+    activityTotal: number
+    offersTotal: number
+    volume24h: number
+    volumeTotal: number
+    lastSyncs: {
+      slug: string
+      name?: string
+      listedCount: number
+      activityCount: number
+      offerCount: number
+      floorPrice?: number
+      volume24h?: number
+      syncedAt?: string
+      syncMs?: number
+    }[]
+  }
+}
+
+export async function fetchAnalyticsDashboard(): Promise<AnalyticsDashboard | null> {
+  return getJson<AnalyticsDashboard>('/v1/analytics/dashboard')
+}

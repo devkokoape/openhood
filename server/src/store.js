@@ -55,9 +55,14 @@ export function scheduleSave() {
 export function saveToDisk() {
   ensureDataDir()
   try {
+    // Keep collection dump leaner for disk (nfts can be large)
+    const collectionsOut = {}
+    for (const [slug, row] of collections.entries()) {
+      collectionsOut[slug] = row
+    }
     const obj = {
       meta,
-      collections: Object.fromEntries(collections.entries()),
+      collections: collectionsOut,
       savedAt: new Date().toISOString(),
     }
     const tmp = `${STORE_FILE}.tmp`
@@ -66,6 +71,26 @@ export function saveToDisk() {
   } catch (e) {
     console.warn('[store] save failed', e?.message || e)
   }
+}
+
+/** Summaries safe for admin (no full nft arrays). */
+export function listCollectionSummaries() {
+  return listCollections().map((row) => ({
+    slug: row.slug,
+    name: row.name,
+    listedCount: row.listedCount || 0,
+    activityCount: row.activities?.length || 0,
+    offerCount: row.offers?.length || 0,
+    floorPrice: row.floorPrice,
+    volume24h: row.volume24h,
+    volumeTotal: row.volumeTotal,
+    owners: row.owners,
+    items: row.items,
+    syncedAt: row.syncedAt,
+    syncMs: row.syncMs,
+    activities: row.activities,
+    offers: row.offers,
+  }))
 }
 
 export function getMeta() {

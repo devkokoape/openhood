@@ -7,12 +7,19 @@ Server-side OpenSea indexer so collection pages load in milliseconds for every u
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness |
-| GET | `/v1/status` | Sync meta + queue |
+| GET | `/v1/status` | Sync meta + queue + analytics counts |
 | GET | `/v1/collections` | Summaries |
 | GET | `/v1/collections/:slug` | Full listings + activity + offers |
 | GET | `/v1/collections/:slug?lite=1` | Smaller payload (first 200 listed) |
+| POST | `/v1/analytics/visit` | Record marketplace page view (browser) |
+| GET | `/v1/analytics/dashboard` | Admin: visits, geo, users, data collection |
 | POST | `/v1/sync` | Sync next batch (`x-sync-secret`) |
 | POST | `/v1/sync/:slug` | Force one collection |
+
+### Analytics / privacy
+- Visits store **hashed IP**, country/city (ipapi.co + locale), path, device, optional wallet.
+- No full raw IP is persisted.
+- Set `ADMIN_DASHBOARD_OPEN=0` + `SYNC_SECRET` to require `x-admin-key` on dashboard GET.
 
 ## Local
 
