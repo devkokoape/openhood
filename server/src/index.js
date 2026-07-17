@@ -13,6 +13,7 @@
  *   GET  /v1/analytics/dashboard
  */
 import http from 'node:http'
+import fs from 'node:fs'
 import {
   loadFromDisk,
   getCollection,
@@ -39,6 +40,15 @@ import {
   recordVisit,
   saveAnalytics,
 } from './analytics.js'
+import {
+  cacheRemoteMedia,
+  ensureMediaDir,
+  mediaCachePass,
+  mediaStats,
+  proxyMediaPath,
+  resolveCollectionMedia,
+  resolveNftMedia,
+} from './media.js'
 
 const PORT = Number(process.env.PORT || 8080)
 const SYNC_SECRET = (process.env.SYNC_SECRET || '').trim()
@@ -65,6 +75,17 @@ function json(res, status, body, cacheSec = 0) {
         : 'no-store',
   })
   res.end(JSON.stringify(body))
+}
+
+function sendFile(res, filePath, contentType, cacheSec = 86400) {
+  cors(res)
+  const buf = fs.readFileSync(filePath)
+  res.writeHead(200, {
+    'Content-Type': contentType || 'application/octet-stream',
+    'Content-Length': buf.length,
+    'Cache-Control': `public, max-age=${cacheSec}, immutable`,
+  })
+  res.end(buf)
 }
 
 function readBody(req) {
@@ -133,6 +154,7 @@ const server = http.createServer(async (req, res) => {
         ts: Date.now(),
         uptimeSec: Math.floor(process.uptime()),
         ...analyticsCounts(),
+        media: mediaStats(),
       })
     }
 
@@ -146,9 +168,62 @@ const server = http.createServer(async (req, res) => {
         ),
         analytics: analyticsCounts(),
         storage: storageInfo(),
+        media: mediaStats(),
         uptimeSec: Math.floor(process.uptime()),
         memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
       })
+    }
+
+    // —— Media cache (images stored on Fly volume) ——
+    // GET /v1/media/nft/:slug/:tokenId
+    if (req.method === 'GET' && pathname.startsWith('/v1/media/nft/')) {
+      const parts = pathname.slice('/v1/media/nft/'.length).split('/').filter(Boolean)
+      const slug = decodeURIComponent(parts[0] || '')
+      const tokenId = decodeURIComponent(parts[1] || '')
+      if (!slug || !tokenId) return json(res, 400, { error: 'slug and tokenId required' })
+      const media = await resolveNftMedia(slug, tokenId)
+      if (!media) {
+        // optional redirect to remote fallback query
+        const fb = url.searchParams.get('fallback')
+        if (fb && /^https?:\/\//i.test(fb)) {
+          cors(res)
+          res.writeHead(302, { Location: fb })
+          res.end()
+          return
+        }
+        return json(res, 404, { error: 'image not found' })
+      }
+      return sendFile(res, media.path, media.contentType, 604800)
+    }
+
+    // GET /v1/media/collection/:slug
+    if (req.method === 'GET' && pathname.startsWith('/v1/media/collection/')) {
+      const slug = decodeURIComponent(pathname.slice('/v1/media/collection/'.length))
+      if (!slug) return json(res, 400, { error: 'slug required' })
+      const media = await resolveCollectionMedia(slug)
+      if (!media) {
+        const fb = url.searchParams.get('fallback')
+        if (fb && /^https?:\/\//i.test(fb)) {
+          cors(res)
+          res.writeHead(302, { Location: fb })
+          res.end()
+          return
+        }
+        return json(res, 404, { error: 'collection image not found' })
+      }
+      return sendFile(res, media.path, media.contentType, 604800)
+    }
+
+    // GET /v1/media/proxy?url=
+    if (req.method === 'GET' && pathname === '/v1/media/proxy') {
+      const remote = url.searchParams.get('url')
+      if (!remote || !/^https?:\/\//i.test(remote)) {
+        return json(res, 400, { error: 'url required' })
+      }
+      const base = proxyMediaPath(remote)
+      const hit = await cacheRemoteMedia(remote, base)
+      if (!hit) return json(res, 404, { error: 'proxy fetch failed' })
+      return sendFile(res, hit.path, hit.contentType, 604800)
     }
 
     if (req.method === 'GET' && pathname === '/v1/collections') {
@@ -348,6 +423,7 @@ const server = http.createServer(async (req, res) => {
 async function main() {
   loadFromDisk()
   loadAnalytics()
+  ensureMediaDir()
 
   const once = process.argv.includes('--once')
   if (once) {
@@ -367,20 +443,29 @@ async function main() {
           : 'NO — set OPENSEA_API_KEY'
       }`
     )
+    console.log(`[openhood-indexer] media cache on volume · ${JSON.stringify(mediaStats())}`)
   })
 
+  // Phase 1: meta pre-index (listings + offers + events + catalog names)
   setTimeout(() => {
     void warmPriority().catch((e) => console.error('[warm]', e))
-  }, 800)
+  }, 500)
 
   setInterval(() => {
     void syncOnce().catch((e) => console.error('[loop]', e))
   }, SYNC_INTERVAL_MS)
 
-  // Fill missing NFT images/names between listing syncs
+  // Phase 2: fill remaining metadata stubs
   setInterval(() => {
     void enrichPass().catch((e) => console.error('[enrich]', e))
   }, Number(process.env.ENRICH_INTERVAL_MS || 20_000))
+
+  // Phase 3: download token art onto Fly disk for fast serving
+  setInterval(() => {
+    void mediaCachePass({ perCollection: 40 }).catch((e) =>
+      console.error('[media]', e)
+    )
+  }, Number(process.env.MEDIA_INTERVAL_MS || 25_000))
 
   // Persist analytics periodically
   setInterval(() => saveAnalytics(), 60_000)

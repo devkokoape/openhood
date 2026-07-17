@@ -93,7 +93,16 @@ export function Home() {
           {[
             { label: '24h volume', value: `${formatPrice(totalVol)} ETH`, accent: true },
             { label: 'Collections', value: String(collections.length) },
-            { label: 'Listed', value: String(nfts.filter((n) => n.listed).length) },
+            {
+              label: 'Listed (est.)',
+              value: String(
+                collections.reduce((s, c) => {
+                  if (c.listedPct && c.items)
+                    return s + Math.round((c.listedPct / 100) * c.items)
+                  return s
+                }, 0) || nfts.filter((n) => n.listed).length
+              ),
+            },
             { label: 'Network', value: 'Robinhood' },
           ].map((s) => (
             <div

@@ -81,33 +81,14 @@ export async function syncSlug(slug) {
   const owners = stats?.total?.num_owners ?? 0
   const items = colMeta?.total_supply || colMeta?.unique_item_count || 0
 
+  // —— Phase A (fast): listings + offers + events only (no image wait) ——
   let nfts = listingsToNfts(listings, collectionId, { name })
-  // 1) Bulk fill from collection NFT catalog (50 tokens per request)
-  try {
-    nfts = await fillListedFromCatalog(slug, nfts, collectionId, {
-      maxPages: Number(process.env.CATALOG_FILL_PAGES || 120),
-    })
-  } catch (e) {
-    console.warn(`[sync] catalog-fill ${slug}`, e?.message || e)
-  }
-  // 2) Individual OpenSea NFT calls for whatever is still a placeholder
-  const enrichLimit = Number(process.env.ENRICH_LIMIT || 150)
-  try {
-    nfts = await enrichImages(nfts, listings, {
-      chain: colMeta?.contracts?.[0]?.chain || 'robinhood',
-      concurrency: Number(process.env.ENRICH_CONCURRENCY || 8),
-      limit: enrichLimit,
-    })
-  } catch (e) {
-    console.warn(`[sync] enrich ${slug}`, e?.message || e)
-  }
-
   const activities = mapEvents(slug, collectionId, events)
   const offers = mapOffers(collectionId, offerRows)
   const listedCount = listings.length
   const listedPct = items > 0 ? +((listedCount / items) * 100).toFixed(1) : 0
 
-  const row = {
+  const baseRow = {
     slug,
     collectionId,
     name,
@@ -130,11 +111,42 @@ export async function syncSlug(slug) {
     source: 'opensea',
     syncedAt: new Date().toISOString(),
     syncMs: Date.now() - t0,
+    indexPhase: 'meta',
+  }
+  // Persist meta immediately so clients can show listed/offer state without images
+  putCollection(slug, baseRow)
+  console.log(
+    `[sync] meta ${slug}: ${listedCount} listed, ${offers.length} offers, ${activities.length} events in ${Date.now() - t0}ms`
+  )
+
+  // —— Phase B: item identity (name/image URL/traits) via catalog pages ——
+  try {
+    nfts = await fillListedFromCatalog(slug, nfts, collectionId, {
+      maxPages: Number(process.env.CATALOG_FILL_PAGES || 120),
+    })
+  } catch (e) {
+    console.warn(`[sync] catalog-fill ${slug}`, e?.message || e)
+  }
+  const enrichLimit = Number(process.env.ENRICH_LIMIT || 80)
+  try {
+    nfts = await enrichImages(nfts, listings, {
+      chain: colMeta?.contracts?.[0]?.chain || 'robinhood',
+      concurrency: Number(process.env.ENRICH_CONCURRENCY || 8),
+      limit: enrichLimit,
+    })
+  } catch (e) {
+    console.warn(`[sync] enrich ${slug}`, e?.message || e)
   }
 
+  const row = {
+    ...baseRow,
+    nfts,
+    syncMs: Date.now() - t0,
+    indexPhase: 'items',
+  }
   putCollection(slug, row)
   console.log(
-    `[sync] done ${slug}: ${listedCount} listed, ${activities.length} events, ${offers.length} offers in ${row.syncMs}ms`
+    `[sync] done ${slug}: ${listedCount} listed, items filled, ${offers.length} offers in ${row.syncMs}ms`
   )
   return row
 }

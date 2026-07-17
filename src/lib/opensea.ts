@@ -647,19 +647,25 @@ export function isVideoMediaUrl(url?: string | null): boolean {
 }
 
 /**
- * Prefer higher-resolution OpenSea / Seadn CDN variants when possible.
- * i2c/raw2 often serve originals; i.seadn.io accepts w= for scaling.
+ * Prefer higher-resolution OpenSea CDN variants when supported.
+ * IMPORTANT: i2c.seadn.io / raw2.seadn.io break with ?w= / auto=format — leave them alone.
  */
 export function upgradeOpenSeaImageUrl(url?: string | null, width = 1200): string {
   if (!url) return ''
+  if (isVideoMediaUrl(url)) return url
   try {
     const u = new URL(url)
-    const host = u.hostname
-    if (host.includes('seadn.io') || host.includes('openseauserdata.com')) {
-      // Avoid upscaling video
-      if (isVideoMediaUrl(url)) return url
+    const host = u.hostname.toLowerCase()
+    // These hosts serve fixed paths; query params can blank the image
+    if (
+      host.includes('i2c.seadn.io') ||
+      host.includes('raw2.seadn.io') ||
+      host.includes('i2.seadn.io')
+    ) {
+      return url
+    }
+    if (host === 'i.seadn.io' || host.includes('openseauserdata.com')) {
       if (!u.searchParams.has('w')) u.searchParams.set('w', String(width))
-      if (!u.searchParams.has('auto')) u.searchParams.set('auto', 'format')
       return u.toString()
     }
   } catch {
@@ -673,9 +679,8 @@ export function pickBestNftImage(raw: {
   display_image_url?: string
   display_animation_url?: string
 }): string {
-  // Prefer full image_url over display thumbnails
-  const primary = raw.image_url || raw.display_image_url || ''
-  return upgradeOpenSeaImageUrl(primary, 1000)
+  // Prefer full image_url; do not mangle Seadn CDN URLs
+  return (raw.image_url || raw.display_image_url || '').trim()
 }
 
 export function mapOpenSeaNftToNft(

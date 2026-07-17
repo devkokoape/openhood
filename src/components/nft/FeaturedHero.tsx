@@ -4,10 +4,14 @@ import { BadgeCheck, ChevronLeft, ChevronRight, ShoppingBag, Sparkles } from 'lu
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
 import { Button } from '../ui/Button'
+import { CollectionBanner } from '../ui/CollectionBanner'
+import { collectionMediaUrl } from '../../lib/mediaUrl'
 import clsx from 'clsx'
 
 export function FeaturedHero({ collections }: { collections: Collection[] }) {
-  const slides = collections.slice(0, 5)
+  // Prefer real OpenSea collections for hero (skip empty-image demo/testnet)
+  const openSea = collections.filter((c) => c.source === 'opensea' && c.image)
+  const slides = openSea.length > 0 ? openSea.slice(0, 5) : collections.slice(0, 5)
   const [index, setIndex] = useState(0)
   const [paused, setPaused] = useState(false)
 
@@ -48,16 +52,16 @@ export function FeaturedHero({ collections }: { collections: Collection[] }) {
               i === safeIndex ? 'opacity-100 scale-100 z-10' : 'opacity-0 scale-105 z-0 pointer-events-none'
             )}
           >
-            <img
+            <CollectionBanner
               src={c.banner}
+              fallbackSrc={collectionMediaUrl(c.slug, c.image) || c.image}
               alt=""
-              className="absolute inset-0 w-full h-full object-cover"
             />
             {/* OpenSea-style multi-stop gradient */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/10" />
-            <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/10 pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent pointer-events-none" />
             {/* Subtle green tint for Robinhood brand */}
-            <div className="absolute inset-0 bg-gradient-to-tr from-[rgba(0,200,5,0.12)] via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-tr from-[rgba(0,200,5,0.12)] via-transparent to-transparent pointer-events-none" />
           </div>
         ))}
 
@@ -72,9 +76,10 @@ export function FeaturedHero({ collections }: { collections: Collection[] }) {
 
               <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
                 <img
-                  src={active.image}
+                  src={collectionMediaUrl(active.slug, active.image) || active.image}
                   alt=""
-                  className="w-12 h-12 sm:w-16 sm:h-16 md:w-[72px] md:h-[72px] rounded-xl sm:rounded-2xl border-2 border-white/30 shadow-2xl object-cover ring-2 ring-hood/40 shrink-0"
+                  referrerPolicy="no-referrer"
+                  className="w-12 h-12 sm:w-16 sm:h-16 md:w-[72px] md:h-[72px] rounded-xl sm:rounded-2xl border-2 border-white/30 shadow-2xl object-cover ring-2 ring-hood/40 shrink-0 bg-surface-2"
                 />
                 <div className="min-w-0 flex-1">
                   <Link

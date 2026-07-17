@@ -11,10 +11,10 @@
 import type { Activity, Nft, Offer } from '../types'
 import { cacheOpenSeaNfts } from './opensea'
 
-const DB_NAME = 'openhood-collection-v4'
+const DB_NAME = 'openhood-collection-v5'
 const STORE = 'collections'
 const DB_VERSION = 1
-const LS_PREFIX = 'oh-col-v4:'
+const LS_PREFIX = 'oh-col-v5:'
 /** Keep localStorage lean so refresh is instant even for large books. */
 const LITE_NFT_CAP = 240
 const LITE_ACTIVITY_CAP = 80

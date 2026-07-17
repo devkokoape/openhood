@@ -3,6 +3,7 @@ import { BadgeCheck } from 'lucide-react'
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
 import { prefetchCollectionCatalog } from '../../lib/prefetchCatalog'
+import { collectionMediaUrl } from '../../lib/mediaUrl'
 
 export function CollectionCard({ collection }: { collection: Collection }) {
   return (
@@ -14,17 +15,27 @@ export function CollectionCard({ collection }: { collection: Collection }) {
     >
       <div className="relative h-28 bg-surface-2 overflow-hidden">
         <img
-          src={collection.banner}
+          src={
+            collection.banner && !/\.(mp4|webm)(\?|$)/i.test(collection.banner)
+              ? collection.banner
+              : collectionMediaUrl(collection.slug, collection.image) ||
+                collection.image
+          }
           alt=""
+          referrerPolicy="no-referrer"
           className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-300"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent" />
       </div>
       <div className="px-4 pb-4 -mt-8 relative">
         <img
-          src={collection.image}
+          src={
+            collectionMediaUrl(collection.slug, collection.image) ||
+            collection.image
+          }
           alt={collection.name}
-          className="w-14 h-14 rounded-xl border-2 border-surface shadow-md object-cover"
+          referrerPolicy="no-referrer"
+          className="w-14 h-14 rounded-xl border-2 border-surface shadow-md object-cover bg-surface-2"
         />
         <div className="mt-2 flex items-center gap-1.5">
           <h3 className="font-semibold text-ink truncate group-hover:text-hood transition-colors">

@@ -5,6 +5,7 @@ import type { Nft } from '../../types'
 import { formatPrice } from '../../data/mockData'
 import { useMarketplace } from '../../context/MarketplaceContext'
 import { SafeImage } from '../ui/SafeImage'
+import { nftMediaUrl } from '../../lib/mediaUrl'
 
 interface Props {
   nft: Nft
@@ -47,12 +48,13 @@ export function NftCard({
   const col = collections.find((c) => c.id === nft.collectionId)
   const inAuction = Boolean(nft.inAuction)
   const isListed = Boolean(nft.listed && !inAuction)
+  const imgSrc = nftMediaUrl(col?.slug, nft.tokenId, nft.image)
 
   const body = (
     <>
       <div className="relative aspect-square bg-surface-2 overflow-hidden">
         <SafeImage
-          src={nft.image}
+          src={imgSrc}
           alt={nft.name}
           fallbackSeed={nft.id}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
