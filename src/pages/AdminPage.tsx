@@ -1,7 +1,7 @@
 /**
  * OpenHood Admin — market intelligence, server status, visits/locations, users, data collection.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -118,7 +118,8 @@ export function AdminPage() {
   >('all')
   const [q, setQ] = useState('')
   const [dash, setDash] = useState<AnalyticsDashboard | null>(null)
-  const [dataSource, setDataSource] = useState<'server' | 'local'>('local')
+  /** fly = production indexer (only source we display when online) */
+  const [dataSource, setDataSource] = useState<'fly' | 'offline'>('fly')
   const [dashError, setDashError] = useState<string | null>(null)
   const [dashLoading, setDashLoading] = useState(false)
   const [flyStatus, setFlyStatus] = useState<{
@@ -132,7 +133,12 @@ export function AdminPage() {
     memoryMb?: number
   } | null>(null)
 
-  /** Market stats from browser (always available) */
+  const dataSourceRef = useRef(dataSource)
+  dataSourceRef.current = dataSource
+  const loadGen = useRef(0)
+  const loadingRef = useRef(false)
+
+  /** Browser market snapshot — ref so poll identity stays stable */
   const marketPatch = useMemo(() => {
     const os = collections.filter((c) => c.source === 'opensea')
     let listedFromCache = 0
@@ -172,18 +178,29 @@ export function AdminPage() {
     }
   }, [collections, openSeaStatus.live, openSeaStatus.hasApiKey])
 
-  const loadDashboard = useCallback(async () => {
-    setDashLoading(true)
+  const marketPatchRef = useRef(marketPatch)
+  marketPatchRef.current = marketPatch
+
+  const loadDashboard = useCallback(async (opts?: { silent?: boolean }) => {
+    // Prevent overlapping polls from racing (server→local flicker)
+    if (loadingRef.current && opts?.silent) return
+    loadingRef.current = true
+    const gen = ++loadGen.current
+    if (!opts?.silent) setDashLoading(true)
     setDashError(null)
 
-    // Always have local baseline immediately
-    const local = buildLocalDashboard(marketPatch)
-    setDash(local)
-    setDataSource('local')
+    const patch = marketPatchRef.current
 
     if (!hasIndexerUrl()) {
-      setFlyStatus(null)
-      setDashLoading(false)
+      // Should not happen — indexerApi hard-defaults to Fly
+      const local = buildLocalDashboard(patch)
+      if (gen === loadGen.current) {
+        setDash(local)
+        setDataSource('offline')
+        setFlyStatus(null)
+        setDashLoading(false)
+      }
+      loadingRef.current = false
       return
     }
 
@@ -192,66 +209,151 @@ export function AdminPage() {
         fetchAnalyticsDashboard(),
         fetchIndexerStatus(),
       ])
-      if (s) setFlyStatus({ ...s, ok: true })
-      else setFlyStatus({ ok: false, error: 'Unreachable' })
+      if (gen !== loadGen.current) return
 
-      if (d && (d.visits || d.dataCollection)) {
-        // Merge: prefer server visits/users; keep richer of data collection
+      if (s) {
+        setFlyStatus({
+          ok: true,
+          collectionCount: s.collectionCount,
+          listedTotal: s.listedTotal,
+          lastFullSyncAt: s.lastFullSyncAt,
+          busy: s.busy,
+          uptimeSec: (s as { uptimeSec?: number }).uptimeSec,
+          memoryMb: (s as { memoryMb?: number }).memoryMb,
+        })
+      } else {
+        setFlyStatus({ ok: false, error: 'Unreachable' })
+      }
+
+      if (d && (d.visits != null || d.dataCollection != null || d.server != null)) {
+        // Prefer Fly numbers for indexed market; fill gaps from browser catalog only
+        const flyDc = d.dataCollection
         const merged: AnalyticsDashboard = {
           ...d,
           dataCollection: {
-            collectionsIndexed: Math.max(
-              d.dataCollection?.collectionsIndexed || 0,
-              marketPatch.collectionsIndexed
-            ),
-            listedTotal: Math.max(
-              d.dataCollection?.listedTotal || 0,
-              marketPatch.listedTotal
-            ),
-            activityTotal: Math.max(
-              d.dataCollection?.activityTotal || 0,
-              marketPatch.activityTotal
-            ),
-            offersTotal: Math.max(
-              d.dataCollection?.offersTotal || 0,
-              marketPatch.offersTotal
-            ),
+            collectionsIndexed:
+              (flyDc?.collectionsIndexed || 0) > 0
+                ? flyDc!.collectionsIndexed
+                : patch.collectionsIndexed,
+            listedTotal:
+              (flyDc?.listedTotal || 0) > 0
+                ? flyDc!.listedTotal
+                : patch.listedTotal,
+            activityTotal:
+              (flyDc?.activityTotal || 0) > 0
+                ? flyDc!.activityTotal
+                : patch.activityTotal,
+            offersTotal:
+              (flyDc?.offersTotal || 0) > 0
+                ? flyDc!.offersTotal
+                : patch.offersTotal,
             volume24h:
-              (d.dataCollection?.volume24h || 0) > 0
-                ? d.dataCollection.volume24h
-                : marketPatch.volume24h,
+              (flyDc?.volume24h || 0) > 0
+                ? flyDc!.volume24h
+                : patch.volume24h,
             volumeTotal:
-              (d.dataCollection?.volumeTotal || 0) > 0
-                ? d.dataCollection.volumeTotal
-                : marketPatch.volumeTotal,
+              (flyDc?.volumeTotal || 0) > 0
+                ? flyDc!.volumeTotal
+                : patch.volumeTotal,
             lastSyncs:
-              d.dataCollection?.lastSyncs?.length
-                ? d.dataCollection.lastSyncs
-                : marketPatch.lastSyncs,
+              flyDc?.lastSyncs?.length
+                ? flyDc.lastSyncs
+                : patch.lastSyncs,
           },
         }
         setDash(merged)
-        setDataSource('server')
+        setDataSource('fly')
+        setDashError(null)
+      } else if (s) {
+        // Status works but dashboard payload thin — keep Fly source, enrich from status
+        setDataSource('fly')
+        setDash((prev) => {
+          if (prev && dataSourceRef.current === 'fly') {
+            return {
+              ...prev,
+              server: {
+                ...prev.server,
+                collectionCount: s.collectionCount ?? prev.server?.collectionCount,
+                listedTotal: s.listedTotal ?? prev.server?.listedTotal,
+                lastFullSyncAt:
+                  s.lastFullSyncAt ?? prev.server?.lastFullSyncAt,
+                busy: s.busy ?? prev.server?.busy,
+                uptimeSec:
+                  (s as { uptimeSec?: number }).uptimeSec ??
+                  prev.server?.uptimeSec,
+              },
+              dataCollection: {
+                ...prev.dataCollection,
+                collectionsIndexed:
+                  s.collectionCount ?? prev.dataCollection.collectionsIndexed,
+                listedTotal:
+                  s.listedTotal ?? prev.dataCollection.listedTotal,
+              },
+            }
+          }
+          // First load: minimal Fly shell
+          return {
+            generatedAt: new Date().toISOString(),
+            server: {
+              collectionCount: s.collectionCount,
+              listedTotal: s.listedTotal,
+              lastFullSyncAt: s.lastFullSyncAt,
+              busy: s.busy,
+              uptimeSec: (s as { uptimeSec?: number }).uptimeSec,
+            },
+            visits: {
+              total: 0,
+              last24h: 0,
+              last7d: 0,
+              uniqueSessions7d: 0,
+              withWallet7d: 0,
+              byDay: [],
+              byHour: [],
+              topPaths: [],
+              topCountries: [],
+              topCities: [],
+              byDevice: [],
+              recent: [],
+            },
+            users: { total: 0, wallets: 0, sessions: 0, activeToday: 0, recent: [] },
+            dataCollection: {
+              collectionsIndexed: s.collectionCount || patch.collectionsIndexed,
+              listedTotal: s.listedTotal || patch.listedTotal,
+              activityTotal: patch.activityTotal,
+              offersTotal: patch.offersTotal,
+              volume24h: patch.volume24h,
+              volumeTotal: patch.volumeTotal,
+              lastSyncs: patch.lastSyncs,
+            },
+          }
+        })
       } else {
-        setDashError(
-          'Fly indexer online check failed — showing browser-local analytics'
-        )
-        setDash(local)
-        setDataSource('local')
+        // Fly fully unreachable — only then show offline snapshot (don't thrash)
+        setDashError('Fly indexer unreachable — showing last known / offline snapshot')
+        setDataSource('offline')
+        setDash((prev) => prev ?? buildLocalDashboard(patch))
       }
     } catch {
-      setDashError('Fly unreachable — showing browser-local analytics')
-      setFlyStatus({ ok: false, error: 'Error' })
-      setDash(local)
-      setDataSource('local')
+      if (gen !== loadGen.current) return
+      setDashError('Fly indexer error — keeping last dashboard if available')
+      setFlyStatus((prev) =>
+        prev ? { ...prev, ok: false, error: 'Error' } : { ok: false, error: 'Error' }
+      )
+      // Stay on fly if we already have a good dashboard; only mark offline cold-start
+      setDataSource((prev) => prev)
+      setDash((prev) => prev ?? buildLocalDashboard(marketPatchRef.current))
     } finally {
-      setDashLoading(false)
+      if (gen === loadGen.current) {
+        setDashLoading(false)
+        loadingRef.current = false
+      }
     }
-  }, [marketPatch])
+  }, [])
 
+  // Stable poll: do NOT depend on marketPatch (it changes every OpenSea tick)
   useEffect(() => {
     void loadDashboard()
-    const id = window.setInterval(() => void loadDashboard(), 20_000)
+    const id = window.setInterval(() => void loadDashboard({ silent: true }), 30_000)
     return () => window.clearInterval(id)
   }, [loadDashboard])
 
@@ -365,16 +467,20 @@ export function AdminPage() {
       <div className="rounded-xl border border-edge bg-surface-2/60 px-4 py-3 text-sm text-ink-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
         <div>
           <strong className="text-ink">Data source: </strong>
-          {dataSource === 'server' ? (
-            <span className="text-hood font-semibold">Fly indexer (shared)</span>
+          {dataSource === 'fly' ? (
+            <span className="text-hood font-semibold">Fly indexer (production)</span>
           ) : (
-            <span className="text-ink font-semibold">This browser (local)</span>
+            <span className="text-ink font-semibold">Offline snapshot</span>
           )}
           {' · '}
-          Market data is served from the Fly indexer only (no local server).
+          Admin stats load only from Fly — no local/server flip.
         </div>
-        <Badge tone={dataSource === 'server' ? 'green' : 'blue'}>
-          {dataSource === 'server' ? 'server' : 'local'}
+        <Badge tone={dataSource === 'fly' && flyStatus?.ok ? 'green' : 'muted'}>
+          {dataSource === 'fly'
+            ? flyStatus?.ok
+              ? 'fly'
+              : 'fly (retrying)'
+            : 'offline'}
         </Badge>
       </div>
 
@@ -411,7 +517,7 @@ export function AdminPage() {
                 <div className="truncate font-mono text-[11px]">
                   {indexerUrl()}
                 </div>
-                {dataSource === 'server' ? (
+                {dataSource === 'fly' || flyStatus?.ok ? (
                   <>
                     <div>
                       Uptime{' '}
@@ -645,11 +751,10 @@ export function AdminPage() {
             </div>
           ) : (
             <>
-              {dataSource === 'local' && (
+              {dataSource === 'offline' && (
                 <p className="text-xs text-ink-3">
-                  Showing visits from <strong className="text-ink">this browser</strong> (timezone /
-                  locale based region). Browse a few pages, then hit Refresh stats. Real city-level
-                  IP geo needs the Fly indexer.
+                  Fly visits unavailable right now. Check that{' '}
+                  <code className="text-hood text-[11px]">openhood-indexer.fly.dev</code> is up.
                 </p>
               )}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
@@ -787,10 +892,9 @@ export function AdminPage() {
             </div>
           ) : (
             <>
-              {dataSource === 'local' && (
+              {dataSource === 'offline' && (
                 <p className="text-xs text-ink-3">
-                  Users on this device only. Connect a wallet while browsing to appear as a wallet
-                  profile. Multi-user tracking requires Fly.
+                  Fly user analytics offline. Reconnect to the indexer to see multi-user data.
                 </p>
               )}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">

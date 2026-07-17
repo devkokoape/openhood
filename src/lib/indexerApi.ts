@@ -84,13 +84,28 @@ async function getJson<T>(path: string): Promise<T | null> {
 }
 
 export async function fetchIndexerStatus(): Promise<{
-  ok: boolean
+  ok?: boolean
   collectionCount?: number
   listedTotal?: number
   lastFullSyncAt?: string | null
   busy?: boolean
+  uptimeSec?: number
+  memoryMb?: number
+  nftsIndexed?: number
+  nftsEnriched?: number
 } | null> {
-  return getJson('/v1/status')
+  const s = await getJson<{
+    collectionCount?: number
+    listedTotal?: number
+    lastFullSyncAt?: string | null
+    busy?: boolean
+    uptimeSec?: number
+    memoryMb?: number
+    nftsIndexed?: number
+    nftsEnriched?: number
+  }>('/v1/status')
+  if (!s) return null
+  return { ...s, ok: true }
 }
 
 export async function fetchIndexerCollection(
