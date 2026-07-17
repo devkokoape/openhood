@@ -120,14 +120,28 @@ export async function fetchIndexerStatus(): Promise<{
 
 export async function fetchIndexerCollection(
   slug: string,
-  opts?: { lite?: boolean; limit?: number; offset?: number }
-): Promise<(IndexerCollectionPayload & { indexing?: boolean }) | null> {
+  opts?: {
+    lite?: boolean
+    limit?: number
+    offset?: number
+    /** all (default) | listed | unlisted — full book for offers on not-for-sale */
+    scope?: 'all' | 'listed' | 'unlisted'
+  }
+): Promise<
+  | (IndexerCollectionPayload & {
+      indexing?: boolean
+      unlistedCount?: number
+      scope?: string
+    })
+  | null
+> {
   const base = baseUrl()
   if (!base) return null
   const params = new URLSearchParams()
   if (opts?.lite !== false) params.set('lite', '1')
   if (opts?.limit != null) params.set('limit', String(opts.limit))
   if (opts?.offset != null) params.set('offset', String(opts.offset))
+  params.set('scope', opts?.scope || 'all')
   const q = params.toString() ? `?${params}` : ''
   try {
     const res = await fetch(
@@ -137,6 +151,8 @@ export async function fetchIndexerCollection(
     if (res.status === 202 || res.ok) {
       return (await res.json()) as IndexerCollectionPayload & {
         indexing?: boolean
+        unlistedCount?: number
+        scope?: string
       }
     }
     return null

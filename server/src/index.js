@@ -25,12 +25,13 @@ import {
   saveToDisk,
   storageInfo,
 } from './store.js'
-import { dbContentStatus, dbReadySlugSet } from './db.js'
+import { dbContentStatus, dbListNftsPage, dbReadySlugSet } from './db.js'
 import {
   defaultSlugs,
   discoverPass,
   downloadAllContent,
   enrichPass,
+  enqueueCatalog,
   enqueueSync,
   isSyncBusy,
   queueDepth,
@@ -549,13 +550,14 @@ const server = http.createServer(async (req, res) => {
       const lite = url.searchParams.get('lite') !== '0'
       const limit = Math.min(
         500,
-        Math.max(1, Number(url.searchParams.get('limit') || (lite ? 120 : 300)))
+        Math.max(1, Number(url.searchParams.get('limit') || (lite ? 48 : 120)))
       )
       const offset = Math.max(0, Number(url.searchParams.get('offset') || 0))
-      const allNfts = row.nfts || []
-      const slice = allNfts.slice(offset, offset + limit)
+      // all | listed | unlisted — default ALL so buyers can offer on not-for-sale items
+      const scope = (url.searchParams.get('scope') || 'all').toLowerCase()
+      const page = dbListNftsPage(slug, { offset, limit, scope })
       // Lean cards: keep traits for filters (cap size); always array
-      const leanNfts = slice.map((n) => {
+      const leanNfts = page.nfts.map((n) => {
         const traits = Array.isArray(n.traits) ? n.traits.slice(0, 16) : []
         if (lite) {
           return {
@@ -574,6 +576,20 @@ const server = http.createServer(async (req, res) => {
         return { ...n, traits }
       })
 
+      // Background: if we only have listings but supply is larger, pull full catalog
+      try {
+        const supply = Number(row.items || 0)
+        if (
+          supply > page.listedCount + 5 &&
+          page.nftsTotal < Math.min(supply, page.listedCount + 20) &&
+          queueDepth() < 120
+        ) {
+          enqueueCatalog(slug)
+        }
+      } catch {
+        /* optional */
+      }
+
       return json(
         res,
         200,
@@ -582,10 +598,13 @@ const server = http.createServer(async (req, res) => {
           description: row.description,
           indexPhase: row.indexPhase,
           nfts: leanNfts,
-          nftsTotal: allNfts.length,
-          offset,
-          limit,
-          hasMore: offset + limit < allNfts.length,
+          nftsTotal: page.nftsTotal,
+          listedCount: page.listedCount,
+          unlistedCount: page.unlistedCount,
+          offset: page.offset,
+          limit: page.limit,
+          scope,
+          hasMore: page.hasMore,
           activities: (row.activities || []).slice(0, lite ? 30 : 80),
           offers: (row.offers || []).slice(0, lite ? 30 : 80),
           prices: lite ? undefined : row.prices || [],

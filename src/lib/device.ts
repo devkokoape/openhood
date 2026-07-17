@@ -45,9 +45,9 @@ export function collectionNftsFirstPage(): number {
 }
 
 export function collectionNftsHardCap(): number {
-  // Page through large books without OOM. Desktop can hold more of a single
-  // collection; phones stay lower. Full supply (e.g. 900+) still uses Load more.
-  return preferLiteMode() ? 240 : 800
+  // Full supply (listed + unlisted) for offers — page via Load more.
+  // Desktop can hold a large single-collection book; phones stay lower.
+  return preferLiteMode() ? 400 : 2000
 }
 
 export function enrichWaveSize(): number {

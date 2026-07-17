@@ -19,6 +19,7 @@ import {
   listingsToNfts,
   mapEvents,
   mapOffers,
+  openSeaGet,
 } from './opensea.js'
 import {
   getCollection,
@@ -30,6 +31,7 @@ import {
   unenrichedTokens,
 } from './store.js'
 import { fetchNft } from './opensea.js'
+import { dbMergeCatalogNfts, dbListNftsPage } from './db.js'
 
 /** Same policy as client: OpenSea + lifetime volume ≥ this → verified */
 export const VERIFIED_MIN_VOLUME_ETH = Number(
@@ -300,13 +302,33 @@ const queue = []
 let queueRunning = false
 let busy = false
 let cursor = 0
+/** Avoid re-queueing catalog for same slug too often */
+const catalogQueuedAt = new Map()
 
 export function enqueueSync(slug, { full = true, front = false } = {}) {
   if (!slug) return
   // de-dupe
-  const exists = queue.find((j) => j.slug === slug && j.full === full)
+  const exists = queue.find(
+    (j) => j.slug === slug && j.full === full && !j.catalog
+  )
   if (exists) return
-  const job = { slug, full }
+  const job = { slug, full, catalog: false }
+  if (front) queue.unshift(job)
+  else queue.push(job)
+  void pumpQueue()
+}
+
+/**
+ * Queue full-collection catalog download (listed + unlisted) so buyers can
+ * browse not-for-sale items and make offers.
+ */
+export function enqueueCatalog(slug, { front = false } = {}) {
+  if (!slug) return
+  const last = catalogQueuedAt.get(slug) || 0
+  if (Date.now() - last < 10 * 60_000) return // once per 10 min
+  if (queue.find((j) => j.slug === slug && j.catalog)) return
+  catalogQueuedAt.set(slug, Date.now())
+  const job = { slug, full: false, catalog: true }
   if (front) queue.unshift(job)
   else queue.push(job)
   void pumpQueue()
@@ -319,7 +341,8 @@ async function pumpQueue() {
     while (queue.length) {
       const job = queue.shift()
       try {
-        if (job.full) await syncSlug(job.slug)
+        if (job.catalog) await syncSlugCatalog(job.slug)
+        else if (job.full) await syncSlug(job.slug)
         else await syncSlugMeta(job.slug)
       } catch (e) {
         console.error(`[queue] ${job.slug}`, e?.message || e)
@@ -330,6 +353,9 @@ async function pumpQueue() {
           // Re-queue full enrich later (back of line) so we eventually finish
           if (job.full) {
             enqueueSync(job.slug, { full: true, front: false })
+          } else if (job.catalog) {
+            catalogQueuedAt.delete(job.slug)
+            enqueueCatalog(job.slug, { front: false })
           }
           await new Promise((r) => setTimeout(r, 2500))
         } else {
@@ -820,12 +846,139 @@ export async function syncSlugItems(slug) {
   return next
 }
 
-/** Full sync: meta then items */
+/**
+ * Page full OpenSea collection NFT catalog into SQLite (listed + unlisted).
+ * Enables marketplace offers on not-for-sale tokens.
+ */
+export async function syncSlugCatalog(slug, { maxPages } = {}) {
+  const pagesCap = Math.min(
+    200,
+    Math.max(4, Number(maxPages || process.env.CATALOG_MAX_PAGES || 80))
+  )
+  const t0 = Date.now()
+  let row = getCollection(slug)
+  if (!row) {
+    row = await syncSlugMeta(slug)
+  }
+  if (!row) return null
+
+  const collectionId = row.collectionId || `os-${slug}`
+  // Active listing prices (from listed book / meta)
+  const priceByToken = new Map()
+  for (const n of row.nfts || []) {
+    if (n.listed && n.price != null) {
+      priceByToken.set(String(n.tokenId), Number(n.price))
+    }
+  }
+  // Refresh listings if we have few prices
+  if (priceByToken.size < 5) {
+    try {
+      const listings = await fetchAllBestListings(slug, { maxPages: 40 })
+      for (const L of listings) {
+        priceByToken.set(String(L.tokenId), L.priceEth)
+      }
+    } catch (e) {
+      console.warn(`[catalog] ${slug} listings`, e?.message || e)
+    }
+  }
+
+  let next = undefined
+  let upserted = 0
+  let listedHits = 0
+  for (let page = 0; page < pagesCap; page++) {
+    let path = `/collection/${encodeURIComponent(slug)}/nfts?limit=50`
+    if (next) path += `&next=${encodeURIComponent(next)}`
+    let data
+    try {
+      data = await openSeaGet(path)
+    } catch (e) {
+      console.warn(`[catalog] ${slug} page ${page}`, e?.message || e)
+      break
+    }
+    const rows = data?.nfts || []
+    if (!rows.length) break
+
+    const batch = []
+    for (const raw of rows) {
+      const tid = raw.identifier != null ? String(raw.identifier) : ''
+      if (!tid) continue
+      const price = priceByToken.get(tid)
+      const listed = price != null && Number(price) > 0
+      if (listed) listedHits++
+      const traits = (raw.traits || [])
+        .filter((t) => t.trait_type != null && t.value != null)
+        .map((t) => ({
+          trait_type: String(t.trait_type),
+          value: String(t.value),
+        }))
+      const tidNum = Number(tid)
+      batch.push({
+        id: `${collectionId}-os-${tid}`,
+        tokenId: Number.isSafeInteger(tidNum) ? tidNum : parseInt(tid, 10) || 0,
+        name: raw.name || `#${tid}`,
+        collectionId,
+        image: raw.image_url || raw.display_image_url || '',
+        owner: raw.owners?.[0]?.address?.toLowerCase() || 'unknown',
+        listed,
+        price: listed ? price : undefined,
+        traits,
+        rarityRank: raw.rarity?.rank,
+      })
+    }
+    if (batch.length) {
+      upserted += dbMergeCatalogNfts(slug, batch, collectionId)
+    }
+    next = data?.next
+    if (!next) break
+    await new Promise((r) => setTimeout(r, 60))
+  }
+
+  // Ensure every actively listed token still present even if not in catalog pages yet
+  if (priceByToken.size) {
+    const missingListed = []
+    for (const [tid, price] of priceByToken) {
+      // cheap check via merge (upsert)
+      missingListed.push({
+        id: `${collectionId}-os-${tid}`,
+        tokenId: Number(tid) || tid,
+        name: `#${tid}`,
+        collectionId,
+        image: '',
+        owner: 'unknown',
+        listed: true,
+        price,
+        traits: [
+          { trait_type: 'Status', value: 'Listed' },
+          { trait_type: 'Token ID', value: String(tid) },
+        ],
+      })
+    }
+    // Only fill gaps that might not have been in catalog — merge preserves art
+    dbMergeCatalogNfts(slug, missingListed, collectionId)
+  }
+
+  const counts = dbListNftsPage(slug, { offset: 0, limit: 1, scope: 'all' })
+  console.log(
+    `[catalog] ${slug}: upserted~${upserted} pages≤${pagesCap} ` +
+      `db total=${counts.nftsTotal} listed=${counts.listedCount} ` +
+      `unlisted=${counts.unlistedCount} in ${Date.now() - t0}ms`
+  )
+  return counts
+}
+
+/** Full sync: meta → listed enrich → full catalog (unlisted for offers) */
 export async function syncSlug(slug) {
   busy = true
   try {
     await syncSlugMeta(slug)
-    return await syncSlugItems(slug)
+    await syncSlugItems(slug)
+    // Full supply catalog so unlisted tokens appear for offers
+    try {
+      await syncSlugCatalog(slug)
+    } catch (e) {
+      console.warn(`[sync:catalog] ${slug}`, e?.message || e)
+    }
+    return getCollection(slug)
   } finally {
     busy = false
   }

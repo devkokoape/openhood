@@ -943,15 +943,29 @@ export function CollectionPage() {
 
               <div className="text-[11px] sm:text-xs text-ink-3 tabular-nums min-w-0 truncate">
                 {items.length.toLocaleString()}
-                {isOpenSeaCol && collection.items > 0 && (
-                  <> / {collection.items.toLocaleString()}</>
-                )}
+                {isOpenSeaCol &&
+                  (openSeaNfts.nftsTotal || collection.items) > 0 && (
+                    <>
+                      {' '}
+                      /{' '}
+                      {(
+                        openSeaNfts.nftsTotal ||
+                        collection.items ||
+                        items.length
+                      ).toLocaleString()}
+                    </>
+                  )}
                 <span className="hidden xs:inline"> items</span>
                 {openSeaNfts.loading && '…'}
                 {isOpenSeaCol && listedCount > 0 && (
                   <span className="ml-1 text-hood/90">
                     · {listedCount.toLocaleString()} listed
                     {listedPct > 0 ? ` (${listedPct}%)` : ''}
+                  </span>
+                )}
+                {isOpenSeaCol && openSeaNfts.unlistedCount > 0 && (
+                  <span className="ml-1 text-ink-3">
+                    · {openSeaNfts.unlistedCount.toLocaleString()} not listed
                   </span>
                 )}
                 {isOpenSeaCol && openSeaNfts.refreshing && !openSeaNfts.loading && (
@@ -966,6 +980,22 @@ export function CollectionPage() {
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2 ml-auto min-w-0">
+                {isOpenSeaCol && (
+                  <select
+                    value={openSeaNfts.scope}
+                    onChange={(e) =>
+                      openSeaNfts.setMarketScope(
+                        e.target.value as 'all' | 'listed' | 'unlisted'
+                      )
+                    }
+                    className="h-9 px-2 sm:px-3 rounded-xl bg-surface-2 border border-edge text-xs sm:text-sm text-ink max-w-[8.5rem] sm:max-w-[150px] min-w-0"
+                    title="Show listed for buy now, or not listed to make offers"
+                  >
+                    <option value="all">All items</option>
+                    <option value="listed">Listed (buy)</option>
+                    <option value="unlisted">Not listed (offer)</option>
+                  </select>
+                )}
                 <select
                   value={sort}
                   onChange={(e) => setSort(e.target.value as SortKey)}
@@ -1113,7 +1143,7 @@ export function CollectionPage() {
                       })}
                     </div>
 
-                    {/* Listings progress — single Load more (OpenSea/ME style) */}
+                    {/* Full book progress — listed + unlisted for offers */}
                     {isOpenSeaCol && (
                       <div className="mt-6 flex flex-col items-center gap-3">
                         <p className="text-xs text-ink-3 text-center max-w-md">
@@ -1125,7 +1155,16 @@ export function CollectionPage() {
                               listedCount ||
                               shown
                             const active =
-                              openSeaNfts.listedCount || listedCount || total
+                              openSeaNfts.listedCount || listedCount || 0
+                            const notListed =
+                              openSeaNfts.unlistedCount ||
+                              Math.max(0, total - active)
+                            const scopeLabel =
+                              openSeaNfts.scope === 'listed'
+                                ? 'listed'
+                                : openSeaNfts.scope === 'unlisted'
+                                  ? 'not listed'
+                                  : 'items'
                             return (
                               <>
                                 Showing{' '}
@@ -1141,16 +1180,20 @@ export function CollectionPage() {
                                     </span>
                                   </>
                                 ) : null}{' '}
-                                listings
-                                {active > 0 && active !== total ? (
+                                {scopeLabel}
+                                {openSeaNfts.scope === 'all' && active > 0 && (
                                   <>
                                     {' '}
-                                    · {active.toLocaleString()} active
-                                    {listedPct > 0 ? ` (${listedPct}%)` : ''}
+                                    · {active.toLocaleString()} for sale
+                                    {notListed > 0 && (
+                                      <>
+                                        {' '}
+                                        · {notListed.toLocaleString()} not
+                                        listed (offers)
+                                      </>
+                                    )}
                                   </>
-                                ) : listedPct > 0 ? (
-                                  <> · {listedPct}% listed</>
-                                ) : null}
+                                )}
                                 {collection.items > 0 && (
                                   <>
                                     {' '}
@@ -1162,6 +1205,12 @@ export function CollectionPage() {
                             )
                           })()}
                         </p>
+                        {openSeaNfts.scope !== 'listed' && (
+                          <p className="text-[11px] text-ink-3 text-center max-w-sm">
+                            Not listed items show as “Not listed” — open one to
+                            make an offer on our marketplace.
+                          </p>
+                        )}
                         {openSeaNfts.hasMore && (
                           <Button
                             size="md"
@@ -1170,16 +1219,16 @@ export function CollectionPage() {
                             onClick={() => void openSeaNfts.loadMore()}
                           >
                             {openSeaNfts.loadingMore
-                              ? 'Loading more listings…'
-                              : 'Load more listings'}
+                              ? 'Loading more items…'
+                              : 'Load more items'}
                           </Button>
                         )}
                         {openSeaNfts.capped && !openSeaNfts.hasMore && (
                           <p className="text-[11px] text-ink-3 text-center max-w-sm">
                             Showing the first{' '}
-                            {collectionNfts.length.toLocaleString()} listings in
-                            this browser for performance. Use trait filters to
-                            narrow the book.
+                            {collectionNfts.length.toLocaleString()} items in
+                            this browser for performance. Use filters (Listed /
+                            Not listed / traits) to narrow the book.
                           </p>
                         )}
                         {!openSeaNfts.hasMore &&
@@ -1187,7 +1236,7 @@ export function CollectionPage() {
                           !openSeaNfts.loadingMore &&
                           collectionNfts.length > 0 && (
                             <p className="text-[11px] text-ink-3">
-                              All loaded listings shown
+                              All loaded items shown
                             </p>
                           )}
                         {openSeaNfts.error && (

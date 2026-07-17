@@ -129,10 +129,15 @@ export function useOpenSeaCollectionNfts(
   const [listedCount, setListedCount] = useState(
     () => initial?.listedCount ?? initial?.nfts?.filter((n) => n.listed).length ?? 0
   )
-  /** Server-side book size (all listed nfts), for "showing X of Y" */
+  /** Server-side book size (listed + unlisted), for "showing X of Y" */
   const [nftsTotal, setNftsTotal] = useState(
     () => initial?.listedCount ?? initial?.nfts?.length ?? 0
   )
+  const [unlistedCount, setUnlistedCount] = useState(0)
+  /** Marketplace filter: full book | buy-now | make-offer targets */
+  const [scope, setScope] = useState<'all' | 'listed' | 'unlisted'>('all')
+  const scopeRef = useRef(scope)
+  scopeRef.current = scope
   const [fromCache, setFromCache] = useState(() => Boolean(initial?.nfts?.length))
   const [enriching, setEnriching] = useState(false)
   const [ready, setReady] = useState(() => Boolean(initial?.nfts?.length))
@@ -242,6 +247,7 @@ export function useOpenSeaCollectionNfts(
           const remote = await fetchIndexerCollection(slugName, {
             lite: true,
             limit: firstLimit,
+            scope: scopeRef.current,
           })
           if (cancelled || gen !== abortGen.current) return
 
@@ -253,6 +259,7 @@ export function useOpenSeaCollectionNfts(
                 id: `${colId}-os-${n.tokenId}`,
                 // Lite payloads omit traits — keep iterable for filters/rarity
                 traits: Array.isArray(n.traits) ? n.traits : [],
+                listed: Boolean(n.listed),
               }))
 
             let nftsMapped = mapRemote(remote.nfts).slice(0, hardCap)
@@ -280,6 +287,10 @@ export function useOpenSeaCollectionNfts(
             setListedCount(
               remote.listedCount ??
                 nftsMapped.filter((n) => n.listed).length
+            )
+            setUnlistedCount(
+              (remote as { unlistedCount?: number }).unlistedCount ??
+                nftsMapped.filter((n) => !n.listed).length
             )
             setTotalLoaded(nftsMapped.length)
             const totalOnServer =
@@ -450,8 +461,19 @@ export function useOpenSeaCollectionNfts(
                 const again = await fetchIndexerCollection(slugName, {
                   lite: true,
                   limit: firstLimit,
+                  scope: scopeRef.current,
                 })
                 if (!again?.nfts?.length) return
+                if (
+                  (again as { unlistedCount?: number }).unlistedCount != null
+                ) {
+                  setUnlistedCount(
+                    (again as { unlistedCount?: number }).unlistedCount || 0
+                  )
+                }
+                if ((again as { nftsTotal?: number }).nftsTotal) {
+                  setNftsTotal((again as { nftsTotal?: number }).nftsTotal!)
+                }
                 const mapped = mapRemote(again.nfts)
                 setNfts((prevList) => {
                   const byTok = new Map(
@@ -459,7 +481,12 @@ export function useOpenSeaCollectionNfts(
                   )
                   for (const n of mapped) {
                     const prev = byTok.get(String(n.tokenId))
-                    if (!prev) continue
+                    if (!prev) {
+                      // Server may have catalog-filled new unlisted tokens
+                      byTok.set(String(n.tokenId), n)
+                      seenIds.current.add(n.id)
+                      continue
+                    }
                     if (
                       nftNeedsMetadata(prev, fallbackImage) &&
                       !nftNeedsMetadata(n, fallbackImage)
@@ -472,6 +499,7 @@ export function useOpenSeaCollectionNfts(
                           Array.isArray(n.traits) && n.traits.length > 2
                             ? n.traits
                             : prev.traits,
+                        listed: n.listed ?? prev.listed,
                       })
                     }
                   }
@@ -777,8 +805,8 @@ export function useOpenSeaCollectionNfts(
       cancelled = true
       signal.cancelled = true
     }
-    // Only re-run when the collection identity changes — not when live stats tweak opts
-  }, [enabled, slug, collectionId, persist])
+    // Re-run when collection identity or market scope (all/listed/unlisted) changes
+  }, [enabled, slug, collectionId, persist, scope])
 
   // When slug changes externally, re-hydrate sync store for new slug
   useEffect(() => {
@@ -823,9 +851,10 @@ export function useOpenSeaCollectionNfts(
           lite: true,
           limit: take,
           offset,
+          scope: scopeRef.current,
         })
         if (!page) {
-          setError('Could not load more listings. Try again.')
+          setError('Could not load more items. Try again.')
           return
         }
         const totalOnServer =
@@ -838,6 +867,11 @@ export function useOpenSeaCollectionNfts(
           nftsTotalRef.current = totalOnServer
         }
         if (page.listedCount != null) setListedCount(page.listedCount)
+        if ((page as { unlistedCount?: number }).unlistedCount != null) {
+          setUnlistedCount(
+            (page as { unlistedCount?: number }).unlistedCount || 0
+          )
+        }
 
         const raw = page.nfts || []
         if (raw.length === 0) {
@@ -853,6 +887,7 @@ export function useOpenSeaCollectionNfts(
           collectionId,
           id: `${collectionId}-os-${n.tokenId}`,
           traits: Array.isArray(n.traits) ? n.traits : [],
+          listed: Boolean(n.listed),
         }))
         const fresh = mapped.filter((n) => !seenIds.current.has(n.id))
         for (const n of fresh) seenIds.current.add(n.id)
@@ -953,6 +988,24 @@ export function useOpenSeaCollectionNfts(
     [slug, collectionId, listedCount, persist]
   )
 
+  /** Switch All / Listed / Not listed — resets and reloads from Fly */
+  const setMarketScope = useCallback(
+    (next: 'all' | 'listed' | 'unlisted') => {
+      if (next === scopeRef.current) return
+      scopeRef.current = next
+      setScope(next)
+      setNfts([])
+      setHasMore(false)
+      setCapped(false)
+      setTotalLoaded(0)
+      setLoading(true)
+      seenIds.current = new Set()
+      nextRef.current = '0'
+      // Trigger main effect by bumping via identity — effect deps include scope
+    },
+    []
+  )
+
   return {
     nfts,
     activities,
@@ -966,7 +1019,10 @@ export function useOpenSeaCollectionNfts(
     capped,
     totalLoaded,
     listedCount,
+    unlistedCount,
     nftsTotal,
+    scope,
+    setMarketScope,
     fromCache,
     ready,
     loadMore,

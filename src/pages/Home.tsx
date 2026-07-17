@@ -1,17 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useMemo, useRef, type RefObject } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
-  Flame,
-  Compass,
-  Trophy,
-  Zap,
 } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { FeaturedHero } from '../components/nft/FeaturedHero'
-import { FeaturedCollectionCard } from '../components/nft/FeaturedCollectionCard'
+import { DiscoverSection } from '../components/nft/DiscoverSection'
+import { MarketPulse } from '../components/nft/MarketPulse'
 import {
   TrendingTable,
   collectionSales,
@@ -19,18 +16,19 @@ import {
 } from '../components/nft/TrendingTable'
 import { NotableCollectionCard } from '../components/nft/NotableCollectionCard'
 import { HomeActivityFeed } from '../components/nft/HomeActivityFeed'
-import { EmptyState } from '../components/ui/EmptyState'
-import { formatPrice } from '../data/mockData'
-import { ONCHAIN_COLLECTION_SLUG, isMarketplaceDeployed } from '../lib/marketplace'
-import clsx from 'clsx'
+import {
+  AnimatedActivity,
+  AnimatedFlame,
+  AnimatedIconBadge,
+  AnimatedTrophy,
+  AnimatedZap,
+} from '../components/ui/AnimatedIcons'
 
 export function Home() {
-  const { collections, nfts, activities } = useMarketplace()
+  const { collections, nfts, activities, chainAuctions } = useMarketplace()
   const [params] = useSearchParams()
   const q = (params.get('q') || '').toLowerCase()
-  const scrollerRef = useRef<HTMLDivElement>(null)
   const notableRef = useRef<HTMLDivElement>(null)
-  const [discoverScroll, setDiscoverScroll] = useState({ atStart: true, atEnd: false })
 
   const featured = useMemo(() => {
     let list = [...collections].sort((a, b) => b.volume24h - a.volume24h)
@@ -44,9 +42,6 @@ export function Home() {
     }
     return list
   }, [collections, q])
-
-  /** Top by 24h volume for Discover rail (marketplace-length strip) */
-  const discoverCollections = useMemo(() => featured.slice(0, 16), [featured])
 
   /** Top collections by 7-day sales (fallback: 7d volume) — single row */
   const notableCollections = useMemo(() => {
@@ -63,31 +58,33 @@ export function Home() {
       .slice(0, 10)
   }, [collections])
 
-  const totalVol = collections.reduce((s, c) => s + c.volume24h, 0)
+  const marketStats = useMemo(() => {
+    const vol24h = collections.reduce((s, c) => s + (c.volume24h || 0), 0)
+    const vol7d = collections.reduce(
+      (s, c) => s + (c.intervals?.volume7d ?? c.volume24h * 4.5),
+      0
+    )
+    const listed =
+      collections.reduce((s, c) => {
+        if (c.listedPct && c.items)
+          return s + Math.round((c.listedPct / 100) * c.items)
+        return s
+      }, 0) || nfts.filter((n) => n.listed).length
 
-  const updateDiscoverScroll = useCallback(() => {
-    const el = scrollerRef.current
-    if (!el) return
-    const max = el.scrollWidth - el.clientWidth
-    const left = el.scrollLeft
-    setDiscoverScroll({
-      atStart: left <= 4,
-      atEnd: max <= 4 || left >= max - 4,
-    })
-  }, [])
+    const nftAuctions = nfts.filter((n) => n.inAuction).length
+    const onChainActive = (chainAuctions || []).filter(
+      (a) => a && a.active && !a.settled
+    ).length
+    const auctions = Math.max(nftAuctions, onChainActive)
 
-  useEffect(() => {
-    const el = scrollerRef.current
-    if (!el) return
-    updateDiscoverScroll()
-    el.addEventListener('scroll', updateDiscoverScroll, { passive: true })
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateDiscoverScroll) : null
-    ro?.observe(el)
-    return () => {
-      el.removeEventListener('scroll', updateDiscoverScroll)
-      ro?.disconnect()
+    return {
+      vol24h,
+      vol7d,
+      collections: collections.length,
+      listed,
+      auctions,
     }
-  }, [updateDiscoverScroll, discoverCollections.length])
+  }, [collections, nfts, chainAuctions])
 
   const scrollBy = (dir: -1 | 1, ref: RefObject<HTMLDivElement | null>) => {
     const el = ref.current
@@ -101,188 +98,22 @@ export function Home() {
     <div className="animate-fade-in w-full overflow-x-hidden">
       {/* Edge-to-edge content — tight side gutters like major marketplaces */}
       <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 pt-3 sm:pt-4 pb-2">
-        {isMarketplaceDeployed() && (
-          <div className="mb-3 rounded-xl border border-hood/30 bg-gradient-to-r from-hood-muted via-surface-2 to-surface-2 px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Zap className="w-4 h-4 text-hood shrink-0" />
-              <p className="text-xs sm:text-sm text-ink-2 truncate">
-                <span className="font-bold text-ink">Testnet live</span>
-                <span className="text-ink-3"> · mint, list & auction with 2.5% fee</span>
-              </p>
-            </div>
-            <Link
-              to={`/collection/${ONCHAIN_COLLECTION_SLUG}`}
-              className="inline-flex items-center justify-center h-9 px-3.5 rounded-lg bg-hood text-[#0b0e11] text-xs sm:text-sm font-bold shrink-0"
-            >
-              Open testnet →
-            </Link>
-          </div>
-        )}
         <FeaturedHero collections={featured} />
       </div>
 
       <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-5 sm:py-6 space-y-8 sm:space-y-10">
-        {/* Market pulse — denser strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 sm:gap-2">
-          {[
-            { label: '24h volume', value: `${formatPrice(totalVol)} ETH`, accent: true },
-            { label: 'Collections', value: String(collections.length) },
-            {
-              label: 'Listed (est.)',
-              value: String(
-                collections.reduce((s, c) => {
-                  if (c.listedPct && c.items)
-                    return s + Math.round((c.listedPct / 100) * c.items)
-                  return s
-                }, 0) || nfts.filter((n) => n.listed).length
-              ),
-            },
-            { label: 'Network', value: 'Robinhood' },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="rounded-xl border border-edge bg-surface-2/70 px-3 py-2.5 relative overflow-hidden"
-            >
-              {s.accent && (
-                <div className="absolute inset-0 bg-gradient-to-br from-hood/12 to-transparent pointer-events-none" />
-              )}
-              <div className="text-[10px] uppercase tracking-wide text-ink-3 font-semibold relative">
-                {s.label}
-              </div>
-              <div
-                className={clsx(
-                  'text-base sm:text-lg font-extrabold mt-0.5 tabular-nums relative',
-                  s.accent ? 'text-hood' : 'text-ink'
-                )}
-              >
-                {s.value}
-              </div>
-            </div>
-          ))}
-        </div>
+        <MarketPulse stats={marketStats} />
 
-        {/* Discover — marketplace-tier collection rail */}
-        <section aria-labelledby="discover-heading" className="relative">
-          <div className="flex items-end justify-between mb-4 gap-3">
-            <div className="flex items-start gap-2.5 min-w-0">
-              <div className="mt-0.5 w-9 h-9 rounded-xl bg-surface-2 border border-edge flex items-center justify-center shrink-0">
-                <Compass className="w-4 h-4 text-hood" strokeWidth={2.25} />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2
-                    id="discover-heading"
-                    className="text-xl sm:text-2xl font-extrabold text-ink tracking-tight"
-                  >
-                    {q ? `Results for “${q}”` : 'Discover'}
-                  </h2>
-                  {!q && discoverCollections.length > 0 && (
-                    <span className="hidden sm:inline-flex items-center h-6 px-2 rounded-full bg-surface-2 border border-edge text-[11px] font-semibold text-ink-3 tabular-nums">
-                      Top {discoverCollections.length} · 24h vol
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs sm:text-sm text-ink-3 mt-0.5 leading-relaxed">
-                  {q
-                    ? 'Collections matching your search on Robinhood Chain'
-                    : 'Top collections by 24h volume on Robinhood Chain'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="hidden sm:flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => scrollBy(-1, scrollerRef)}
-                  className="market-icon-btn"
-                  aria-label="Scroll Discover left"
-                  disabled={discoverScroll.atStart || discoverCollections.length === 0}
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollBy(1, scrollerRef)}
-                  className="market-icon-btn"
-                  aria-label="Scroll Discover right"
-                  disabled={discoverScroll.atEnd || discoverCollections.length === 0}
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-              <Link
-                to={q ? `/collections?q=${encodeURIComponent(q)}` : '/collections'}
-                className={clsx(
-                  'inline-flex items-center gap-1 h-8 px-3 rounded-full',
-                  'text-xs sm:text-sm font-bold text-hood',
-                  'bg-hood-muted/60 hover:bg-hood-muted border border-hood/15',
-                  'transition-colors'
-                )}
-              >
-                View all
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-          </div>
-
-          {discoverCollections.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-edge bg-surface-2/40">
-              <EmptyState
-                title={q ? 'No collections match' : 'No collections yet'}
-                description={
-                  q
-                    ? 'Try a different search or browse the full catalog.'
-                    : 'Collections will appear here as the market loads.'
-                }
-                actionLabel="Browse collections"
-                actionTo="/collections"
-                icon={<Compass className="w-5 h-5" />}
-              />
-            </div>
-          ) : (
-            <div className="market-rail-fade -mx-2 px-2 sm:-mx-3 sm:px-3 lg:-mx-4 lg:px-4">
-              <div
-                ref={scrollerRef}
-                className="market-rail hide-scrollbar"
-                role="list"
-                aria-label="Discover collections"
-              >
-                {discoverCollections.map((c, i) => (
-                  <div key={c.id} role="listitem" className="snap-start">
-                    <FeaturedCollectionCard collection={c} rank={i + 1} />
-                  </div>
-                ))}
-
-                {/* End-of-rail CTA card */}
-                <Link
-                  to="/collections"
-                  className={clsx(
-                    'snap-start shrink-0 flex flex-col items-center justify-center gap-2',
-                    'w-[140px] sm:w-[160px] min-h-[272px] sm:min-h-[288px]',
-                    'rounded-2xl border border-dashed border-edge bg-surface-2/50',
-                    'text-ink-2 hover:text-hood hover:border-hood/40 hover:bg-hood-muted/30',
-                    'transition-colors duration-200'
-                  )}
-                >
-                  <span className="w-10 h-10 rounded-full border border-edge bg-surface flex items-center justify-center">
-                    <ArrowRight className="w-4 h-4" />
-                  </span>
-                  <span className="text-xs font-bold">See all</span>
-                </Link>
-              </div>
-            </div>
-          )}
-        </section>
+        <DiscoverSection collections={collections} searchQuery={q} />
 
         {/* Trending + Degen */}
         <section className="grid lg:grid-cols-[1fr_min(320px,30%)] gap-4 sm:gap-5">
           <div className="min-w-0">
             <div className="flex items-center justify-between mb-2.5 gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-hood/25 to-hood/5 border border-hood/20 flex items-center justify-center shrink-0">
-                  <Flame className="w-4 h-4 text-hood" />
-                </div>
+                <AnimatedIconBadge tone="hood" className="w-8 h-8">
+                  <AnimatedFlame className="text-hood" size="md" />
+                </AnimatedIconBadge>
                 <div className="min-w-0">
                   <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
                     Trending
@@ -317,7 +148,7 @@ export function Home() {
             </div>
             <div className="relative">
               <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-hood/15 text-hood text-[10px] font-bold uppercase tracking-wider mb-2">
-                <Zap className="w-3 h-3" />
+                <AnimatedZap size="sm" className="text-hood" />
                 Degen Mode
               </div>
               <h3 className="text-lg font-extrabold text-ink">Mint & bulk buy</h3>
@@ -338,9 +169,9 @@ export function Home() {
         <section>
           <div className="flex items-end justify-between mb-3 gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-hood to-[#00a804] flex items-center justify-center shrink-0 shadow-md shadow-hood/25">
-                <Trophy className="w-4 h-4 text-[#0b0e11]" />
-              </div>
+              <AnimatedIconBadge tone="solid-hood" className="w-8 h-8">
+                <AnimatedTrophy size="md" />
+              </AnimatedIconBadge>
               <div className="min-w-0">
                 <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
                   Notable collections
@@ -405,13 +236,18 @@ export function Home() {
         {/* Live activity — Blur/OpenSea dense feed */}
         <section>
           <div className="flex items-end justify-between mb-3 gap-3">
-            <div className="min-w-0">
-              <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
-                Activity
-              </h2>
-              <p className="text-xs sm:text-sm text-ink-3 mt-0.5">
-                Real-time sales, lists & mints
-              </p>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <AnimatedIconBadge tone="default" className="w-8 h-8">
+                <AnimatedActivity className="text-hood" size="md" />
+              </AnimatedIconBadge>
+              <div className="min-w-0">
+                <h2 className="text-lg sm:text-xl font-extrabold text-ink tracking-tight">
+                  Activity
+                </h2>
+                <p className="text-xs sm:text-sm text-ink-3 mt-0.5">
+                  Real-time sales, lists & mints
+                </p>
+              </div>
             </div>
             <Link
               to="/activity"

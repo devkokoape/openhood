@@ -519,7 +519,7 @@ export function dbGetCollection(slug, { includeNfts = true, listedOnly = true } 
   if (!row) return null
   let nfts = []
   if (includeNfts) {
-    // Default: active book only (listed=1). Avoids ghost listings after delist.
+    // Default listed-only for sync/cache memory; public API uses dbListNftsPage(scope=all)
     nfts = getDb()
       .prepare(
         listedOnly
@@ -528,12 +528,165 @@ export function dbGetCollection(slug, { includeNfts = true, listedOnly = true } 
           : `SELECT * FROM nfts WHERE slug = ?
              ORDER BY listed DESC,
                CASE WHEN price IS NULL THEN 1 ELSE 0 END,
-               price ASC`
+               price ASC,
+               CAST(token_id AS INTEGER) ASC`
       )
       .all(slug)
       .map(rowToNft)
   }
   return rowToCollection(row, nfts)
+}
+
+/**
+ * Paginated NFT book for marketplace UI.
+ * scope=all → listed first, then unlisted (so offers work on not-for-sale tokens).
+ * scope=listed | unlisted for filters.
+ */
+export function dbListNftsPage(
+  slug,
+  { offset = 0, limit = 48, scope = 'all' } = {}
+) {
+  const database = getDb()
+  const off = Math.max(0, Number(offset) || 0)
+  const lim = Math.min(500, Math.max(1, Number(limit) || 48))
+  const sc = String(scope || 'all').toLowerCase()
+
+  let where = 'slug = ?'
+  if (sc === 'listed') where += ' AND listed = 1'
+  else if (sc === 'unlisted') where += ' AND (listed = 0 OR listed IS NULL)'
+
+  const total = database
+    .prepare(`SELECT COUNT(*) AS c FROM nfts WHERE ${where}`)
+    .get(slug).c
+  const listed = database
+    .prepare(`SELECT COUNT(*) AS c FROM nfts WHERE slug = ? AND listed = 1`)
+    .get(slug).c
+  const unlisted = database
+    .prepare(
+      `SELECT COUNT(*) AS c FROM nfts WHERE slug = ? AND (listed = 0 OR listed IS NULL)`
+    )
+    .get(slug).c
+
+  const rows = database
+    .prepare(
+      `SELECT * FROM nfts WHERE ${where}
+       ORDER BY listed DESC,
+         CASE WHEN price IS NULL THEN 1 ELSE 0 END,
+         price ASC,
+         CAST(token_id AS INTEGER) ASC
+       LIMIT ? OFFSET ?`
+    )
+    .all(slug, lim, off)
+    .map(rowToNft)
+
+  return {
+    nfts: rows,
+    offset: off,
+    limit: lim,
+    nftsTotal: Number(total || 0),
+    listedCount: Number(listed || 0),
+    unlistedCount: Number(unlisted || 0),
+    hasMore: off + rows.length < Number(total || 0),
+  }
+}
+
+/**
+ * Upsert catalog tokens without wiping listing flags on tokens not in this batch.
+ * Used when paging the full OpenSea collection (listed + not listed).
+ */
+export function dbMergeCatalogNfts(slug, nfts, collectionId) {
+  if (!nfts?.length) return 0
+  const database = getDb()
+  const now = new Date().toISOString()
+  const existing = database
+    .prepare(
+      'SELECT token_id, name, image, owner, traits_json, enriched, listed, price FROM nfts WHERE slug = ?'
+    )
+    .all(slug)
+  const prevByToken = new Map(existing.map((r) => [String(r.token_id), r]))
+
+  const bySlugToken = database.prepare(
+    `INSERT INTO nfts (
+      id, slug, collection_id, token_id, name, image, owner, listed, price,
+      rarity_rank, traits_json, enriched, updated_at
+    ) VALUES (
+      @id, @slug, @collection_id, @token_id, @name, @image, @owner, @listed, @price,
+      @rarity_rank, @traits_json, @enriched, @updated_at
+    )
+    ON CONFLICT(slug, token_id) DO UPDATE SET
+      id=excluded.id,
+      name=excluded.name,
+      image=excluded.image,
+      owner=excluded.owner,
+      listed=excluded.listed,
+      price=excluded.price,
+      rarity_rank=COALESCE(excluded.rarity_rank, rarity_rank),
+      traits_json=excluded.traits_json,
+      enriched=excluded.enriched,
+      updated_at=excluded.updated_at,
+      collection_id=excluded.collection_id`
+  )
+
+  let n = 0
+  database.exec('BEGIN')
+  try {
+    for (const raw of nfts) {
+      const tokenId = String(raw.tokenId)
+      const old = prevByToken.get(tokenId)
+      let name = raw.name
+      let image = raw.image
+      let owner = raw.owner
+      let traits = raw.traits || []
+      if (old) {
+        if ((!image || String(image).includes('dicebear')) && old.image)
+          image = old.image
+        if ((!name || String(name).startsWith('#')) && old.name) name = old.name
+        if ((!owner || owner === 'unknown') && old.owner) owner = old.owner
+        const oldTraits = parseJson(old.traits_json, [])
+        if ((traits?.length || 0) <= 2 && oldTraits.length > 2) traits = oldTraits
+      }
+      // Prefer explicit listing from catalog merge (price map); keep prior listed if unknown
+      let listed =
+        raw.listed === true ? 1 : raw.listed === false ? 0 : old?.listed ? 1 : 0
+      let price =
+        raw.price != null
+          ? raw.price
+          : listed
+            ? old?.price ?? null
+            : null
+      if (!listed) price = null
+
+      const traitsJson = JSON.stringify(traits || [])
+      const enriched = isEnriched(image, name, traits)
+      const id =
+        raw.id || `${collectionId || `os-${slug}`}-os-${tokenId}`
+      bySlugToken.run({
+        id,
+        slug,
+        collection_id: collectionId || raw.collectionId || `os-${slug}`,
+        token_id: tokenId,
+        name: name || `#${tokenId}`,
+        image: image || '',
+        owner: owner || 'unknown',
+        listed,
+        price,
+        rarity_rank: raw.rarityRank ?? null,
+        traits_json: traitsJson,
+        enriched,
+        updated_at: now,
+      })
+      n++
+    }
+    database.exec('COMMIT')
+  } catch (e) {
+    try {
+      database.exec('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    throw e
+  }
+  return n
 }
 
 export function dbListCollections({ withNfts = false } = {}) {

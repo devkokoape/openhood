@@ -152,10 +152,32 @@ export function putCollection(slug, row) {
 
   dbUpsertCollection(next)
   dbReplaceNfts(slug, nfts, next.collectionId)
-  collectionCache.set(slug, next)
+  // Cache listed book for sync memory; unlisted stay in SQLite for marketplace API
+  const listedView = dbGetCollection(slug, {
+    includeNfts: true,
+    listedOnly: true,
+  })
+  collectionCache.set(
+    slug,
+    listedView
+      ? {
+          ...next,
+          nfts: listedView.nfts,
+          listedCount:
+            listedView.listedCount ?? listedView.nfts?.length ?? next.listedCount,
+        }
+      : next
+  )
   // Content readiness may change after sync/enrich writes
   invalidateReadySlugCache()
-  return next
+  return listedView
+    ? {
+        ...next,
+        nfts: listedView.nfts,
+        listedCount:
+          listedView.listedCount ?? listedView.nfts?.length ?? next.listedCount,
+      }
+    : next
 }
 
 export function patchCollectionNfts(slug, patchesByToken) {
