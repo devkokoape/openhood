@@ -41,8 +41,8 @@ jobs:
           # Optional admin panel credentials (defaults exist in client; override via secrets)
           VITE_ADMIN_USER: ${{ secrets.ADMIN_USER }}
           VITE_ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
-          # Fly indexer API (optional) — e.g. https://openhood-indexer.fly.dev
-          VITE_INDEXER_URL: ${{ secrets.INDEXER_URL }}
+          # Always Fly production indexer — never localhost (client also hard-defaults here)
+          VITE_INDEXER_URL: https://openhood-indexer.fly.dev
         run: npm run build
 
       # SPA fallback for client-side routes

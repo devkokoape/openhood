@@ -15,8 +15,7 @@
     "contracts:smoke:testnet": "hardhat run scripts/smoke-test.cjs --network robinhoodTestnet",
     "contracts:deploy:wait": "node scripts/deploy-when-funded.cjs",
     "opensea:refresh": "node scripts/refresh-opensea-snapshot.cjs",
-    "indexer:dev": "npm --prefix server start",
-    "indexer:once": "npm --prefix server run sync:once"
+    "indexer:fly:status": "curl -s https://openhood-indexer.fly.dev/v1/status"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.2.0",

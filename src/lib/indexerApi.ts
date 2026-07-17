@@ -1,8 +1,14 @@
 /**
- * OpenHood server indexer client (Fly).
- * When VITE_INDEXER_URL is set, collection pages hydrate from our API first.
+ * OpenHood indexer client — always uses the Fly production API.
+ *
+ * Single source of truth: https://openhood-indexer.fly.dev
+ * Local indexer (localhost:8080) is intentionally NOT used — shared Fly cache
+ * avoids split-brain catalogs and stale local SQLite bugs.
  */
 import type { Activity, Nft, Offer } from '../types'
+
+/** Production Fly indexer — never point the marketplace at a local server. */
+export const FLY_INDEXER_URL = 'https://openhood-indexer.fly.dev'
 
 export interface IndexerCollectionPayload {
   slug: string
@@ -26,13 +32,34 @@ export interface IndexerCollectionPayload {
   prices?: [string, number][]
   syncedAt?: string
   source?: string
+  indexing?: boolean
+  empty?: boolean
+  nftsTotal?: number
+  hasMore?: boolean
+}
+
+function isLocalhostUrl(u: string): boolean {
+  return /localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]/i.test(u)
 }
 
 function baseUrl(): string {
-  const u = (import.meta.env.VITE_INDEXER_URL as string | undefined)?.trim()
-  return u ? u.replace(/\/$/, '') : ''
+  const raw = (import.meta.env.VITE_INDEXER_URL as string | undefined)?.trim()
+  if (raw) {
+    const cleaned = raw.replace(/\/$/, '')
+    // Refuse local indexer — forces everyone onto Fly
+    if (isLocalhostUrl(cleaned)) {
+      console.warn(
+        '[openhood] Ignoring local VITE_INDEXER_URL — using Fly:',
+        FLY_INDEXER_URL
+      )
+      return FLY_INDEXER_URL
+    }
+    return cleaned
+  }
+  return FLY_INDEXER_URL
 }
 
+/** Always true — marketplace is Fly-backed. */
 export function hasIndexerUrl(): boolean {
   return Boolean(baseUrl())
 }
@@ -47,7 +74,6 @@ async function getJson<T>(path: string): Promise<T | null> {
   try {
     const res = await fetch(`${base}${path.startsWith('/') ? path : `/${path}`}`, {
       headers: { accept: 'application/json' },
-      // short cache ok — server already caches
       cache: 'no-store',
     })
     if (!res.ok) return null
@@ -74,7 +100,6 @@ export async function fetchIndexerCollection(
   const base = baseUrl()
   if (!base) return null
   const params = new URLSearchParams()
-  // Default lite for speed (lean NFT fields, capped count)
   if (opts?.lite !== false) params.set('lite', '1')
   if (opts?.limit != null) params.set('limit', String(opts.limit))
   if (opts?.offset != null) params.set('offset', String(opts.offset))
@@ -84,7 +109,6 @@ export async function fetchIndexerCollection(
       `${base}/v1/collections/${encodeURIComponent(slug)}${q}`,
       { headers: { accept: 'application/json' }, cache: 'no-store' }
     )
-    // 202 = still indexing on Fly — return body so client can poll
     if (res.status === 202 || res.ok) {
       return (await res.json()) as IndexerCollectionPayload & {
         indexing?: boolean

@@ -371,8 +371,7 @@ export function AdminPage() {
             <span className="text-ink font-semibold">This browser (local)</span>
           )}
           {' · '}
-          Visits, users, and location work from local storage now. Deploy Fly + set{' '}
-          <code className="text-hood text-xs">VITE_INDEXER_URL</code> for multi-user / real IP geo.
+          Market data is served from the Fly indexer only (no local server).
         </div>
         <Badge tone={dataSource === 'server' ? 'green' : 'blue'}>
           {dataSource === 'server' ? 'server' : 'local'}
@@ -400,12 +399,8 @@ export function AdminPage() {
                 <Server className="w-3.5 h-3.5 text-hood" /> Server
               </div>
               <div className="mt-2 flex items-center gap-2 flex-wrap">
-                <Badge tone={hasIndexerUrl() && flyStatus?.ok ? 'green' : dataSource === 'local' ? 'blue' : 'muted'}>
-                  {hasIndexerUrl()
-                    ? flyStatus?.ok
-                      ? 'fly online'
-                      : 'fly offline'
-                    : 'local mode'}
+                <Badge tone={flyStatus?.ok ? 'green' : 'muted'}>
+                  {flyStatus?.ok ? 'fly online' : 'fly offline'}
                 </Badge>
                 {flyStatus?.busy && <Badge tone="orange">syncing</Badge>}
                 <Badge tone={openSeaStatus.live ? 'green' : 'muted'}>
@@ -414,7 +409,7 @@ export function AdminPage() {
               </div>
               <div className="mt-2 text-xs text-ink-2 space-y-1">
                 <div className="truncate font-mono text-[11px]">
-                  {hasIndexerUrl() ? indexerUrl() : 'Browser · no VITE_INDEXER_URL'}
+                  {indexerUrl()}
                 </div>
                 {dataSource === 'server' ? (
                   <>
