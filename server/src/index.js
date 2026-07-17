@@ -21,6 +21,7 @@ import {
   listCollectionSummaries,
   getMeta,
   saveToDisk,
+  storageInfo,
 } from './store.js'
 import {
   defaultSlugs,
@@ -144,6 +145,7 @@ const server = http.createServer(async (req, res) => {
           (process.env.OPENSEA_API_KEY || process.env.VITE_OPENSEA_API_KEY || '').trim()
         ),
         analytics: analyticsCounts(),
+        storage: storageInfo(),
         uptimeSec: Math.floor(process.uptime()),
         memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
       })

@@ -2,6 +2,8 @@
 
 Server-side OpenSea indexer so collection pages load in milliseconds for every user.
 
+**Storage:** SQLite on the Fly volume (`/data/openhood.db`) via Node’s built-in `node:sqlite` — collections, per-token NFT rows (name/image/traits/price), visits, and users. Legacy `index-store.json` is imported once automatically.
+
 ## API
 
 | Method | Path | Description |
@@ -75,7 +77,8 @@ GitHub Actions: set secret `INDEXER_URL` (see deploy workflow).
 |-----|---------|---------|
 | `OPENSEA_API_KEY` | — | Required for live OpenSea |
 | `PORT` | `8080` | HTTP port |
-| `DATA_DIR` | `/data` | Persist JSON store |
+| `DATA_DIR` | `/data` | Volume root (SQLite + optional legacy JSON) |
+| `SQLITE_PATH` | `$DATA_DIR/openhood.db` | SQLite database file |
 | `SYNC_INTERVAL_MS` | `45000` | Batch loop |
 | `SYNC_BATCH` | `3` | Collections per loop |
 | `INDEX_SLUGS` | priority list | Comma slugs to index |

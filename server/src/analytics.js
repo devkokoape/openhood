@@ -1,78 +1,37 @@
 /**
- * Marketplace analytics: visits, locations, users, session stats.
- * Geo from client hints + free IP lookup (ipapi.co) with cache.
+ * Marketplace analytics on SQLite (visits, locations, users).
  */
 import crypto from 'node:crypto'
-import fs from 'node:fs'
-import path from 'node:path'
-import { scheduleSave, ensureDataDir } from './store.js'
-
-const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : './data')
-const ANALYTICS_FILE = path.join(DATA_DIR, 'analytics-store.json')
+import {
+  dbGetUser,
+  dbInsertVisit,
+  dbListUsers,
+  dbListVisits,
+  dbStats,
+  dbTrimVisits,
+  dbUpsertUser,
+  listCollectionSummariesSafe,
+  metaGet,
+  metaSet,
+} from './db-analytics-bridge.js'
 
 const MAX_VISITS = Number(process.env.MAX_VISITS || 8000)
-const MAX_USERS = Number(process.env.MAX_USERS || 4000)
 const DEDUPE_MS = 25_000
 
-/** @type {any[]} */
-let visits = []
-/** @type {Map<string, any>} */
-const users = new Map()
 /** @type {Map<string, any>} */
 const geoCache = new Map()
 /** rate limit: session+path → lastAt */
 const dedupe = new Map()
 
-let stats = {
-  totalVisits: 0,
-  totalSessions: 0,
-  totalWallets: 0,
-  startedAt: new Date().toISOString(),
-}
-
 export function loadAnalytics() {
-  ensureDataDir()
-  try {
-    if (!fs.existsSync(ANALYTICS_FILE)) return
-    const raw = JSON.parse(fs.readFileSync(ANALYTICS_FILE, 'utf8'))
-    visits = Array.isArray(raw.visits) ? raw.visits : []
-    if (raw.users && typeof raw.users === 'object') {
-      for (const [k, v] of Object.entries(raw.users)) users.set(k, v)
-    }
-    if (raw.stats) stats = { ...stats, ...raw.stats }
-    console.log(
-      `[analytics] loaded ${visits.length} visits, ${users.size} users`
-    )
-  } catch (e) {
-    console.warn('[analytics] load failed', e?.message || e)
-  }
+  // SQLite already loaded via store/db; trim oversized history
+  dbTrimVisits(MAX_VISITS)
+  const s = dbStats()
+  console.log(`[analytics] sqlite visits=${s.visits} users=${s.users}`)
 }
 
 export function saveAnalytics() {
-  ensureDataDir()
-  try {
-    const obj = {
-      stats,
-      visits: visits.slice(-MAX_VISITS),
-      users: Object.fromEntries(users.entries()),
-      savedAt: new Date().toISOString(),
-    }
-    const tmp = `${ANALYTICS_FILE}.tmp`
-    fs.writeFileSync(tmp, JSON.stringify(obj))
-    fs.renameSync(tmp, ANALYTICS_FILE)
-  } catch (e) {
-    console.warn('[analytics] save failed', e?.message || e)
-  }
-}
-
-let saveTimer = null
-function scheduleAnalyticsSave() {
-  if (saveTimer) return
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    saveAnalytics()
-  }, 2000)
-  scheduleSave()
+  // write-through SQLite — checkpoint handled by store.saveToDisk
 }
 
 function hashIp(ip) {
@@ -91,7 +50,6 @@ function clientIp(req) {
 }
 
 async function resolveGeo(ip, clientHints = {}) {
-  // Prefer client-provided coarse location (no permission prompt)
   if (clientHints.country || clientHints.city || clientHints.region) {
     return {
       country: clientHints.country || null,
@@ -117,7 +75,6 @@ async function resolveGeo(ip, clientHints = {}) {
   if (geoCache.has(ip)) return geoCache.get(ip)
 
   try {
-    // Free, no key — rate limited; fine for admin-scale traffic
     const res = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`, {
       headers: { accept: 'application/json', 'user-agent': 'openhood-indexer/1.0' },
       signal: AbortSignal.timeout(2500),
@@ -168,9 +125,6 @@ function uaBrief(ua) {
   return 'Desktop'
 }
 
-/**
- * Record a page visit from the marketplace frontend.
- */
 export async function recordVisit(req, body = {}) {
   const ip = clientIp(req)
   const ipHash = hashIp(ip)
@@ -223,13 +177,14 @@ export async function recordVisit(req, body = {}) {
     connected: Boolean(wallet),
   }
 
-  visits.push(visit)
-  if (visits.length > MAX_VISITS) visits = visits.slice(-MAX_VISITS)
-  stats.totalVisits = (stats.totalVisits || 0) + 1
+  dbInsertVisit(visit)
+  dbTrimVisits(MAX_VISITS)
 
-  // User / session profile
+  const totalVisits = (metaGet('analytics_totalVisits', 0) || 0) + 1
+  metaSet('analytics_totalVisits', totalVisits)
+
   const uid = wallet || sessionId
-  const prev = users.get(uid) || {
+  const prev = dbGetUser(uid) || {
     id: uid,
     kind: wallet ? 'wallet' : 'session',
     wallet: wallet || null,
@@ -247,44 +202,28 @@ export async function recordVisit(req, body = {}) {
     prev.wallet = wallet
     prev.kind = 'wallet'
   }
-  prev.paths[path] = (prev.paths[path] || 0) + 1
-  const ckey = geo.country || geo.countryCode || 'Unknown'
-  prev.countries[ckey] = (prev.countries[ckey] || 0) + 1
-  prev.devices[visit.device] = (prev.devices[visit.device] || 0) + 1
-  prev.lastGeo = visit.geo
   prev.lastPath = path
   prev.locale = body.locale || prev.locale
   prev.timezone = visit.timezone || prev.timezone
-  users.set(uid, prev)
+  prev.lastGeo = visit.geo
+  prev.countries = prev.countries || {}
+  prev.devices = prev.devices || {}
+  const ckey = geo.country || geo.countryCode || 'Unknown'
+  prev.countries[ckey] = (prev.countries[ckey] || 0) + 1
+  prev.devices[visit.device] = (prev.devices[visit.device] || 0) + 1
+  prev.topCountry = Object.entries(prev.countries).sort((a, b) => b[1] - a[1])[0]?.[0]
+  prev.topDevice = Object.entries(prev.devices).sort((a, b) => b[1] - a[1])[0]?.[0]
+  dbUpsertUser(prev)
 
-  // Also index by session if wallet present
   if (wallet && sessionId !== wallet) {
-    const sess = users.get(sessionId)
+    const sess = dbGetUser(sessionId)
     if (sess) {
       sess.wallet = wallet
       sess.kind = 'wallet'
-      users.set(sessionId, sess)
+      dbUpsertUser(sess)
     }
   }
 
-  if (users.size > MAX_USERS) {
-    // Drop oldest by lastSeen
-    const sorted = [...users.entries()].sort(
-      (a, b) =>
-        new Date(a[1].lastSeen || 0).getTime() -
-        new Date(b[1].lastSeen || 0).getTime()
-    )
-    for (let i = 0; i < sorted.length - MAX_USERS; i++) {
-      users.delete(sorted[i][0])
-    }
-  }
-
-  stats.totalSessions = new Set(
-    [...users.values()].map((u) => u.sessionId).filter(Boolean)
-  ).size
-  stats.totalWallets = [...users.values()].filter((u) => u.wallet).length
-
-  scheduleAnalyticsSave()
   return { ok: true, visitId: visit.id, geo: visit.geo }
 }
 
@@ -296,23 +235,21 @@ function hourKey(ts) {
   return new Date(ts).toISOString().slice(0, 13) + ':00'
 }
 
-/**
- * Full dashboard payload for admin panel.
- */
 export function buildDashboard({ collections = [], serverMeta = {} } = {}) {
+  const visits = dbListVisits(MAX_VISITS)
+  const userRows = dbListUsers(4000)
   const now = Date.now()
   const dayMs = 86_400_000
   const last24 = visits.filter((v) => now - v.ts < dayMs)
   const last7 = visits.filter((v) => now - v.ts < dayMs * 7)
 
-  // Locations
   const byCountry = {}
   const byCity = {}
   for (const v of last7) {
     const c = v.geo?.country || 'Unknown'
-    const city = [v.geo?.city, v.geo?.region, v.geo?.countryCode]
-      .filter(Boolean)
-      .join(', ') || 'Unknown'
+    const city =
+      [v.geo?.city, v.geo?.region, v.geo?.countryCode].filter(Boolean).join(', ') ||
+      'Unknown'
     byCountry[c] = (byCountry[c] || 0) + 1
     byCity[city] = (byCity[city] || 0) + 1
   }
@@ -325,94 +262,69 @@ export function buildDashboard({ collections = [], serverMeta = {} } = {}) {
     .sort((a, b) => b.count - a.count)
     .slice(0, 25)
 
-  // Paths
   const byPath = {}
-  for (const v of last7) {
-    byPath[v.path] = (byPath[v.path] || 0) + 1
-  }
+  for (const v of last7) byPath[v.path] = (byPath[v.path] || 0) + 1
   const topPaths = Object.entries(byPath)
     .map(([path, count]) => ({ path, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 20)
 
-  // Devices
   const byDevice = {}
   for (const v of last7) {
     byDevice[v.device || 'unknown'] = (byDevice[v.device || 'unknown'] || 0) + 1
   }
 
-  // Daily series (7d)
   const daily = {}
-  for (let i = 6; i >= 0; i--) {
-    const k = dayKey(now - i * dayMs)
-    daily[k] = 0
-  }
+  for (let i = 6; i >= 0; i--) daily[dayKey(now - i * dayMs)] = 0
   for (const v of last7) {
     const k = dayKey(v.ts)
     if (daily[k] != null) daily[k]++
   }
-  const visitsByDay = Object.entries(daily).map(([date, count]) => ({
-    date,
-    count,
-  }))
+  const visitsByDay = Object.entries(daily).map(([date, count]) => ({ date, count }))
 
-  // Hourly last 24h
   const hourly = {}
-  for (let i = 23; i >= 0; i--) {
-    const k = hourKey(now - i * 3_600_000)
-    hourly[k] = 0
-  }
+  for (let i = 23; i >= 0; i--) hourly[hourKey(now - i * 3_600_000)] = 0
   for (const v of last24) {
     const k = hourKey(v.ts)
     if (hourly[k] != null) hourly[k]++
   }
-  const visitsByHour = Object.entries(hourly).map(([hour, count]) => ({
-    hour,
-    count,
+  const visitsByHour = Object.entries(hourly).map(([hour, count]) => ({ hour, count }))
+
+  const userList = userRows.slice(0, 100).map((u) => ({
+    id: u.id,
+    kind: u.kind,
+    wallet: u.wallet,
+    visits: u.visits,
+    firstSeen: u.firstSeen,
+    lastSeen: u.lastSeen,
+    lastPath: u.lastPath,
+    lastGeo: u.lastGeo,
+    locale: u.locale,
+    timezone: u.timezone,
+    topCountry: u.topCountry,
+    topDevice: u.topDevice,
   }))
 
-  // Users
-  const userList = [...users.values()]
-    .sort(
-      (a, b) =>
-        new Date(b.lastSeen || 0).getTime() - new Date(a.lastSeen || 0).getTime()
-    )
-    .slice(0, 100)
-    .map((u) => ({
-      id: u.id,
-      kind: u.kind,
-      wallet: u.wallet,
-      visits: u.visits,
-      firstSeen: u.firstSeen,
-      lastSeen: u.lastSeen,
-      lastPath: u.lastPath,
-      lastGeo: u.lastGeo,
-      locale: u.locale,
-      timezone: u.timezone,
-      topCountry: Object.entries(u.countries || {}).sort((a, b) => b[1] - a[1])[0]?.[0],
-      topDevice: Object.entries(u.devices || {}).sort((a, b) => b[1] - a[1])[0]?.[0],
-    }))
-
-  const walletsConnected = userList.filter((u) => u.wallet).length
-  const activeToday = userList.filter(
+  const walletsConnected = userRows.filter((u) => u.wallet).length
+  const activeToday = userRows.filter(
     (u) => now - new Date(u.lastSeen || 0).getTime() < dayMs
   ).length
 
-  // Data collection summary from indexed collections
+  const cols = collections.length ? collections : listCollectionSummariesSafe()
   const dataCollection = {
-    collectionsIndexed: collections.length,
-    listedTotal: collections.reduce((s, c) => s + (c.listedCount || 0), 0),
-    activityTotal: collections.reduce(
+    collectionsIndexed: cols.length,
+    listedTotal: cols.reduce((s, c) => s + (c.listedCount || 0), 0),
+    activityTotal: cols.reduce(
       (s, c) => s + (c.activities?.length || c.activityCount || 0),
       0
     ),
-    offersTotal: collections.reduce(
+    offersTotal: cols.reduce(
       (s, c) => s + (c.offers?.length || c.offerCount || 0),
       0
     ),
-    volume24h: collections.reduce((s, c) => s + (c.volume24h || 0), 0),
-    volumeTotal: collections.reduce((s, c) => s + (c.volumeTotal || 0), 0),
-    lastSyncs: collections
+    volume24h: cols.reduce((s, c) => s + (c.volume24h || 0), 0),
+    volumeTotal: cols.reduce((s, c) => s + (c.volumeTotal || 0), 0),
+    lastSyncs: cols
       .map((c) => ({
         slug: c.slug,
         name: c.name,
@@ -447,6 +359,8 @@ export function buildDashboard({ collections = [], serverMeta = {} } = {}) {
       referrer: v.referrer,
     }))
 
+  const s = dbStats()
+
   return {
     generatedAt: new Date().toISOString(),
     server: {
@@ -455,9 +369,12 @@ export function buildDashboard({ collections = [], serverMeta = {} } = {}) {
       memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
       node: process.version,
       pid: process.pid,
+      storage: 'sqlite',
+      nftsIndexed: s.nfts,
+      nftsEnriched: s.enriched,
     },
     visits: {
-      total: stats.totalVisits || visits.length,
+      total: metaGet('analytics_totalVisits', visits.length) || visits.length,
       last24h: last24.length,
       last7d: last7.length,
       uniqueSessions7d: new Set(last7.map((v) => v.sessionId)).size,
@@ -473,9 +390,9 @@ export function buildDashboard({ collections = [], serverMeta = {} } = {}) {
       recent: recentVisits,
     },
     users: {
-      total: users.size,
-      wallets: stats.totalWallets || walletsConnected,
-      sessions: stats.totalSessions || users.size,
+      total: userRows.length,
+      wallets: walletsConnected,
+      sessions: userRows.length,
       activeToday,
       recent: userList,
     },
@@ -484,9 +401,12 @@ export function buildDashboard({ collections = [], serverMeta = {} } = {}) {
 }
 
 export function analyticsCounts() {
+  const s = dbStats()
   return {
-    visitsStored: visits.length,
-    usersStored: users.size,
-    totalVisits: stats.totalVisits,
+    visitsStored: s.visits,
+    usersStored: s.users,
+    totalVisits: metaGet('analytics_totalVisits', s.visits) || s.visits,
+    nftsIndexed: s.nfts,
+    nftsEnriched: s.enriched,
   }
 }
