@@ -11,6 +11,8 @@ Server-side OpenSea indexer so collection pages load in milliseconds for every u
 | GET | `/v1/collections` | Summaries |
 | GET | `/v1/collections/:slug` | Full listings + activity + offers |
 | GET | `/v1/collections/:slug?lite=1` | Smaller payload (first 200 listed) |
+| GET | `/v1/collections/:slug/nfts/:tokenId` | Single NFT metadata |
+| GET | `/v1/nfts/:id` | Resolve NFT by route id (detail page) |
 | POST | `/v1/analytics/visit` | Record marketplace page view (browser) |
 | GET | `/v1/analytics/dashboard` | Admin: visits, geo, users, data collection |
 | POST | `/v1/sync` | Sync next batch (`x-sync-secret`) |

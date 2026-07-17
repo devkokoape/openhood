@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BadgeCheck, Gavel, Tag } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
@@ -21,7 +21,9 @@ import {
   useMarketplaceTx,
 } from '../hooks/useOnChainMarket'
 import { getCachedOpenSeaNft } from '../lib/opensea'
+import { parseNftRouteId, resolveNftById } from '../lib/resolveNft'
 import type { Hex } from 'viem'
+import type { Nft } from '../types'
 
 export function NftDetailPage() {
   const { id } = useParams()
@@ -71,9 +73,65 @@ export function NftDetailPage() {
     pending?: boolean
   } | null>(null)
 
-  const nft =
-    nfts.find((n) => n.id === id) || (id ? getCachedOpenSeaNft(id) : undefined)
-  const collection = nft ? collections.find((c) => c.id === nft.collectionId) : undefined
+  const [resolved, setResolved] = useState<Nft | null>(null)
+  const [resolving, setResolving] = useState(Boolean(id))
+
+  // Immediate sync candidates
+  const syncNft =
+    (id && nfts.find((n) => n.id === id)) ||
+    (id ? getCachedOpenSeaNft(id) : undefined) ||
+    // tokenId match across open sea catalog
+    (id
+      ? (() => {
+          const { tokenId } = parseNftRouteId(id)
+          if (!tokenId) return undefined
+          return (
+            nfts.find((n) => String(n.tokenId) === tokenId && n.id.includes('-os-')) ||
+            getCachedOpenSeaNft(id)
+          )
+        })()
+      : undefined)
+
+  useEffect(() => {
+    if (!id) {
+      setResolved(null)
+      setResolving(false)
+      return
+    }
+    if (syncNft) {
+      setResolved(syncNft)
+      setResolving(false)
+      return
+    }
+    let cancelled = false
+    setResolving(true)
+    const { slugGuess, collectionId } = parseNftRouteId(id)
+    const col =
+      collections.find((c) => c.id === collectionId) ||
+      collections.find((c) => c.slug === slugGuess)
+    void resolveNftById(id, {
+      slug: col?.slug || slugGuess || undefined,
+      contractAddress: col?.contractAddress,
+      chain: col?.chain || 'robinhood',
+      collectionId: col?.id || collectionId || undefined,
+    }).then((n) => {
+      if (cancelled) return
+      setResolved(n)
+      setResolving(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [id, syncNft, collections])
+
+  const nft = syncNft || resolved || undefined
+  const collection = nft
+    ? collections.find((c) => c.id === nft.collectionId) ||
+      collections.find((c) => {
+        const g = parseNftRouteId(nft.id).slugGuess
+        return g ? c.slug === g : false
+      })
+    : undefined
   const itemOffers = offers.filter((o) => o.nftId === nft?.id)
   const itemActivity = activities.filter((a) => a.nftId === nft?.id)
 
@@ -119,13 +177,36 @@ export function NftDetailPage() {
     }
   }
 
+  if (resolving && !nft) {
+    return (
+      <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-20 text-center text-ink-2">
+        <p className="text-ink font-medium">Loading NFT…</p>
+        <p className="text-sm text-ink-3 mt-1">Fetching metadata from cache / indexer</p>
+      </div>
+    )
+  }
+
   if (!nft || !collection) {
     return (
       <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 py-20 text-center text-ink-2">
-        NFT not found.{' '}
-        <Link to="/" className="text-hood">
-          Explore
-        </Link>
+        <p className="text-ink font-medium">NFT not found</p>
+        <p className="text-sm text-ink-3 mt-1 max-w-md mx-auto">
+          This item may not be in the local cache yet. Open its collection first, or wait for the
+          indexer to enrich listings.
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-3">
+          {id && parseNftRouteId(id).slugGuess && (
+            <Link
+              to={`/collection/${parseNftRouteId(id).slugGuess}`}
+              className="text-hood font-semibold hover:underline"
+            >
+              View collection
+            </Link>
+          )}
+          <Link to="/collections" className="text-hood font-semibold hover:underline">
+            Browse collections
+          </Link>
+        </div>
       </div>
     )
   }

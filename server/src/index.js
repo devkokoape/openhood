@@ -16,12 +16,21 @@ import http from 'node:http'
 import {
   loadFromDisk,
   getCollection,
+  getNft,
   listCollections,
   listCollectionSummaries,
   getMeta,
   saveToDisk,
 } from './store.js'
-import { defaultSlugs, isSyncBusy, syncOnce, syncSlug, warmPriority } from './sync.js'
+import {
+  defaultSlugs,
+  enrichPass,
+  isSyncBusy,
+  syncOnce,
+  syncSlug,
+  warmPriority,
+} from './sync.js'
+import { fetchNft } from './opensea.js'
 import {
   analyticsCounts,
   buildDashboard,
@@ -145,11 +154,101 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { collections: rows, count: rows.length }, 5)
     }
 
-    if (req.method === 'GET' && pathname.startsWith('/v1/collections/')) {
-      const slug = decodeURIComponent(
-        pathname.slice('/v1/collections/'.length).split('/')[0]
+    // GET /v1/nfts/:id  — detail page resolve after refresh
+    if (req.method === 'GET' && pathname.startsWith('/v1/nfts/')) {
+      const rawId = decodeURIComponent(pathname.slice('/v1/nfts/'.length))
+      if (!rawId) return json(res, 400, { error: 'missing id' })
+      let nft = getNft(rawId)
+      if (!nft) {
+        // Live OpenSea fallback: ?slug=&tokenId=&contract=
+        const slug = url.searchParams.get('slug')
+        const tokenId = url.searchParams.get('tokenId')
+        const contract = url.searchParams.get('contract')
+        const chain = url.searchParams.get('chain') || 'robinhood'
+        if (slug && tokenId && contract) {
+          try {
+            const raw = await fetchNft(chain, contract, tokenId)
+            if (raw) {
+              const price = url.searchParams.get('price')
+              nft = {
+                id: `os-${slug}-os-${tokenId}`,
+                tokenId: Number(tokenId) || 0,
+                name: raw.name || `#${tokenId}`,
+                collectionId: `os-${slug}`,
+                image: raw.image_url || raw.display_image_url || '',
+                owner: raw.owners?.[0]?.address?.toLowerCase() || 'unknown',
+                listed: price != null && Number(price) > 0,
+                price: price != null ? Number(price) : undefined,
+                traits: (raw.traits || [])
+                  .filter((t) => t.trait_type != null && t.value != null)
+                  .map((t) => ({
+                    trait_type: String(t.trait_type),
+                    value: String(t.value),
+                  })),
+                _slug: slug,
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      if (!nft) return json(res, 404, { error: 'nft not found', id: rawId })
+      const { _slug, ...rest } = nft
+      return json(
+        res,
+        200,
+        { nft: rest, slug: _slug || null },
+        30
       )
+    }
+
+    if (req.method === 'GET' && pathname.startsWith('/v1/collections/')) {
+      const rest = pathname.slice('/v1/collections/'.length)
+      const parts = rest.split('/').filter(Boolean)
+      const slug = decodeURIComponent(parts[0] || '')
       if (!slug) return json(res, 400, { error: 'missing slug' })
+
+      // GET /v1/collections/:slug/nfts/:tokenId
+      if (parts[1] === 'nfts' && parts[2]) {
+        const tokenId = decodeURIComponent(parts[2])
+        let nft = getNft(slug, tokenId)
+        if (!nft) {
+          const row = getCollection(slug)
+          if (row?.contractAddress) {
+            try {
+              const raw = await fetchNft(
+                row.chain || 'robinhood',
+                row.contractAddress,
+                tokenId
+              )
+              if (raw) {
+                nft = {
+                  id: `${row.collectionId || `os-${slug}`}-os-${tokenId}`,
+                  tokenId: Number(tokenId) || 0,
+                  name: raw.name || `#${tokenId}`,
+                  collectionId: row.collectionId || `os-${slug}`,
+                  image: raw.image_url || raw.display_image_url || '',
+                  owner: raw.owners?.[0]?.address?.toLowerCase() || 'unknown',
+                  listed: false,
+                  traits: (raw.traits || [])
+                    .filter((t) => t.trait_type != null && t.value != null)
+                    .map((t) => ({
+                      trait_type: String(t.trait_type),
+                      value: String(t.value),
+                    })),
+                  _slug: slug,
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        if (!nft) return json(res, 404, { error: 'nft not found', slug, tokenId })
+        const { _slug, ...restNft } = nft
+        return json(res, 200, { nft: restNft, slug }, 30)
+      }
 
       let row = getCollection(slug)
       if (!row?.nfts?.length) {
@@ -275,6 +374,11 @@ async function main() {
   setInterval(() => {
     void syncOnce().catch((e) => console.error('[loop]', e))
   }, SYNC_INTERVAL_MS)
+
+  // Fill missing NFT images/names between listing syncs
+  setInterval(() => {
+    void enrichPass().catch((e) => console.error('[enrich]', e))
+  }, Number(process.env.ENRICH_INTERVAL_MS || 20_000))
 
   // Persist analytics periodically
   setInterval(() => saveAnalytics(), 60_000)

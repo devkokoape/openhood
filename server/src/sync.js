@@ -12,7 +12,16 @@ import {
   mapEvents,
   mapOffers,
 } from './opensea.js'
-import { getCollection, getMeta, putCollection, setMeta } from './store.js'
+import {
+  getCollection,
+  getMeta,
+  listCollections,
+  patchCollectionNfts,
+  putCollection,
+  setMeta,
+  unenrichedTokens,
+} from './store.js'
+import { fetchNft } from './opensea.js'
 
 /** Priority slugs (high volume / demo) — always first. */
 export const PRIORITY_SLUGS = [
@@ -72,12 +81,13 @@ export async function syncSlug(slug) {
   const items = colMeta?.total_supply || colMeta?.unique_item_count || 0
 
   let nfts = listingsToNfts(listings, collectionId, { name, image })
-  // Enrich first 60 images (visible grid)
+  // Enrich a large batch on every sync (rest filled by background enrich loop)
+  const enrichLimit = Number(process.env.ENRICH_LIMIT || 250)
   try {
     nfts = await enrichImages(nfts, listings, {
-      chain: 'robinhood',
-      concurrency: 6,
-      limit: Number(process.env.ENRICH_LIMIT || 60),
+      chain: colMeta?.contracts?.[0]?.chain || 'robinhood',
+      concurrency: Number(process.env.ENRICH_CONCURRENCY || 8),
+      limit: enrichLimit,
     })
   } catch (e) {
     console.warn(`[sync] enrich ${slug}`, e?.message || e)
@@ -172,4 +182,53 @@ export async function warmPriority() {
 
 export function isSyncBusy() {
   return busy
+}
+
+/**
+ * Continuously fill missing NFT images/names for stored collections.
+ * Runs between listing syncs so deep-scroll items get real art.
+ */
+let enrichBusy = false
+export async function enrichPass() {
+  if (enrichBusy || busy) return
+  enrichBusy = true
+  try {
+    const cols = listCollections()
+    for (const c of cols) {
+      const missing = unenrichedTokens(c.slug, Number(process.env.ENRICH_BATCH || 40))
+      if (!missing.length) continue
+      const contract = c.contractAddress || missing[0]?.contract
+      if (!contract) continue
+      console.log(`[enrich] ${c.slug}: ${missing.length} items`)
+      const patches = new Map()
+      for (const m of missing) {
+        try {
+          const raw = await fetchNft(m.chain || 'robinhood', m.contract || contract, m.tokenId)
+          if (!raw) continue
+          patches.set(String(m.tokenId), {
+            name: raw.name || undefined,
+            image: raw.image_url || raw.display_image_url || undefined,
+            owner: raw.owners?.[0]?.address?.toLowerCase() || undefined,
+            traits: (raw.traits || [])
+              .filter((t) => t.trait_type != null && t.value != null)
+              .map((t) => ({
+                trait_type: String(t.trait_type),
+                value: String(t.value),
+              })),
+          })
+        } catch {
+          /* skip */
+        }
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      if (patches.size) {
+        patchCollectionNfts(c.slug, patches)
+        console.log(`[enrich] ${c.slug}: patched ${patches.size}`)
+      }
+      // one collection per pass to stay polite to OpenSea
+      break
+    }
+  } finally {
+    enrichBusy = false
+  }
 }

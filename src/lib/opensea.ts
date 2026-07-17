@@ -605,7 +605,28 @@ export function cacheOpenSeaNfts(list: Nft[]) {
 }
 
 export function getCachedOpenSeaNft(id: string): Nft | undefined {
-  return nftCache.get(id)
+  const exact = nftCache.get(id)
+  if (exact) return exact
+  // Match by token suffix when collectionId prefix differs (os1- vs os-)
+  const m = id.match(/-os-(.+)$/)
+  if (!m) return undefined
+  const token = m[1]
+  for (const n of nftCache.values()) {
+    if (String(n.tokenId) === token || n.id.endsWith(`-os-${token}`)) return n
+  }
+  return undefined
+}
+
+/** Fetch single NFT metadata from OpenSea (chain/contract/tokenId). */
+export async function fetchOpenSeaNft(
+  chain: string,
+  contract: string,
+  tokenId: string | number
+): Promise<OpenSeaNftPayload | null> {
+  const data = await openSeaGet<{ nft?: OpenSeaNftPayload }>(
+    `/chain/${encodeURIComponent(chain)}/contract/${encodeURIComponent(contract)}/nfts/${encodeURIComponent(String(tokenId))}`
+  )
+  return data?.nft ?? null
 }
 
 export function openSeaNftId(collectionId: string, tokenId: string | number): string {
@@ -808,18 +829,6 @@ export async function fetchOpenSeaCollectionNftsPage(
     nfts: data?.nfts ?? [],
     next: data?.next ?? null,
   }
-}
-
-/** Single NFT metadata (image, name, traits, owner). */
-export async function fetchOpenSeaNft(
-  chain: string,
-  contract: string,
-  tokenId: string | number
-): Promise<OpenSeaNftPayload | null> {
-  const data = await openSeaGet<{ nft?: OpenSeaNftPayload }>(
-    `/chain/${encodeURIComponent(chain)}/contract/${encodeURIComponent(contract)}/nfts/${encodeURIComponent(String(tokenId))}`
-  )
-  return data?.nft ?? null
 }
 
 /**

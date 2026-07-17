@@ -206,7 +206,7 @@ export function NftCard({
   }
 
   return (
-    <Link to={`/nft/${nft.id}`} className={clsx(shell, 'block')}>
+    <Link to={`/nft/${encodeURIComponent(nft.id)}`} className={clsx(shell, 'block')}>
       {body}
     </Link>
   )

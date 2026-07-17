@@ -39,6 +39,7 @@ import type { ActivityType } from '../types'
 import { ONCHAIN_COLLECTION_ID, parseOnChainTokenId } from '../lib/marketplace'
 import { useMarketplaceTx } from '../hooks/useOnChainMarket'
 import { useOpenSeaCollectionNfts } from '../hooks/useOpenSeaCollectionNfts'
+import { useVisibleNftEnrich } from '../hooks/useVisibleNftEnrich'
 import { TxToast } from '../components/wallet/TxToast'
 import { RiskBadge } from '../components/nft/RiskBadge'
 import { CollectionBanner } from '../components/ui/CollectionBanner'
@@ -184,6 +185,15 @@ export function CollectionPage() {
     }
     return nfts.filter((n) => n.collectionId === collection.id)
   }, [collection, nfts, openSeaNfts.nfts])
+
+  // Progressive art for deep-scroll listings (placeholders → real images)
+  useVisibleNftEnrich(collectionNfts, {
+    enabled: Boolean(isOpenSeaCol && collection?.contractAddress),
+    collectionId: collection?.id,
+    contractAddress: collection?.contractAddress,
+    chain: collection?.chain || 'robinhood',
+    onPatch: openSeaNfts.replaceNfts,
+  })
 
   const traitStats = useMemo(() => buildTraitStats(collectionNfts), [collectionNfts])
 

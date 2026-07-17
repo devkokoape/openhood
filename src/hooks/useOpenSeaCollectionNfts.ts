@@ -444,7 +444,8 @@ export function useOpenSeaCollectionNfts(
               })
             }
 
-            await enrichNftsFromOpenSea(items.slice(0, 60), colId, {
+            // Enrich first 120 for above-the-fold + early scroll; rest via useVisibleNftEnrich
+            await enrichNftsFromOpenSea(items.slice(0, 120), colId, {
               chain,
               contract: contractAddr,
               concurrency: 10,
@@ -453,8 +454,8 @@ export function useOpenSeaCollectionNfts(
             })
             if (cancelled || gen !== abortGen.current) return
 
-            if (items.length > 60) {
-              void enrichNftsFromOpenSea(items.slice(60), colId, {
+            if (items.length > 120) {
+              void enrichNftsFromOpenSea(items.slice(120, 400), colId, {
                 chain,
                 contract: contractAddr,
                 concurrency: 6,
@@ -630,6 +631,25 @@ export function useOpenSeaCollectionNfts(
     [enabled, slug, collectionId, listedCount, persist]
   )
 
+  /** Replace catalog after progressive image enrich (scroll). */
+  const replaceNfts = useCallback(
+    (next: Nft[]) => {
+      setNfts(next)
+      setTotalLoaded(next.length)
+      cacheOpenSeaNfts(next)
+      if (slug && collectionId) {
+        void persist({
+          slug,
+          collectionId,
+          nfts: next,
+          listedCount:
+            listedCount || next.filter((n) => n.listed).length,
+        })
+      }
+    },
+    [slug, collectionId, listedCount, persist]
+  )
+
   return {
     nfts,
     activities,
@@ -646,6 +666,7 @@ export function useOpenSeaCollectionNfts(
     ready,
     loadMore,
     loadAll,
+    replaceNfts,
     enabled,
   }
 }
