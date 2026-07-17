@@ -312,11 +312,16 @@ function adminAuthHeaders(): HeadersInit {
 
 /**
  * Trigger OpenSea → Fly bulk download (queued on server).
- * mode: verified (default preferred) | all | missing | enrich
- * Server always ranks verified (≥3 ETH vol) first.
+ * mode: mainnet (default, Robinhood mainnet only) | verified | all | missing | enrich
  */
 export async function triggerContentDownload(
-  mode: 'all' | 'missing' | 'meta' | 'enrich' | 'verified' = 'verified'
+  mode:
+    | 'mainnet'
+    | 'all'
+    | 'missing'
+    | 'meta'
+    | 'enrich'
+    | 'verified' = 'mainnet'
 ): Promise<{
   ok?: boolean
   error?: string
@@ -331,6 +336,8 @@ export async function triggerContentDownload(
   fullQueued?: number
   verifiedCount?: number
   verifiedQueued?: number
+  mainnetOnly?: boolean
+  chain?: string
 } | null> {
   const base = baseUrl()
   if (!base) return null

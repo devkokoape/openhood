@@ -583,11 +583,16 @@ const server = http.createServer(async (req, res) => {
         })
       }
       const body = await readBody(req)
-      const mode = ['all', 'missing', 'meta', 'enrich', 'verified'].includes(
-        body?.mode
-      )
+      const mode = [
+        'mainnet',
+        'all',
+        'missing',
+        'meta',
+        'enrich',
+        'verified',
+      ].includes(body?.mode)
         ? body.mode
-        : 'verified'
+        : 'mainnet'
       // Don't await multi-hour work — queue and return immediately after discover
       const result = await downloadAllContent({ mode })
       return json(res, 200, result)

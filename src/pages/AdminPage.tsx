@@ -401,7 +401,9 @@ export function AdminPage() {
   }, [tab, loadContentStatus])
 
   const runDownload = useCallback(
-    async (mode: 'all' | 'missing' | 'meta' | 'enrich' | 'verified') => {
+    async (
+      mode: 'mainnet' | 'all' | 'missing' | 'meta' | 'enrich' | 'verified'
+    ) => {
       setDownloadBusy(true)
       setDownloadMsg(null)
       try {
@@ -612,9 +614,9 @@ export function AdminPage() {
                   Fly content status
                 </h2>
                 <p className="text-sm text-ink-2 mt-1 max-w-2xl leading-relaxed">
-                  OpenSea → Fly content health. Downloads always prioritize{' '}
-                  <strong className="text-ink">verified</strong> collections first (≥3 ETH
-                  lifetime volume), then the rest — so real markets are ready for users sooner.
+                  OpenSea → Fly for <strong className="text-ink">Robinhood mainnet only</strong>{' '}
+                  (not testnet). Downloads prioritize <strong className="text-ink">verified</strong>{' '}
+                  (≥3 ETH volume), then other active mainnet markets.
                 </p>
                 {content?.lastDownloadAt && (
                   <p className="text-xs text-ink-3 mt-2">
@@ -646,26 +648,36 @@ export function AdminPage() {
                   onClick={() => {
                     if (
                       !window.confirm(
-                        'Start with VERIFIED collections first (≥3 ETH volume):\n• Full listings + art for verified\n• Then listings for everyone else\n\nThis is the recommended download order.'
+                        'Download ROBINHOOD MAINNET only (not testnet):\n\n1) Verified markets first (listings + art)\n2) Other active mainnet markets (listings)\n\nSkips empty spam shells and testnet.'
                       )
                     ) {
                       return
                     }
-                    void runDownload('verified')
+                    void runDownload('mainnet')
                   }}
-                  title="Verified collections first (≥3 ETH volume), then the rest"
+                  title="Robinhood mainnet only — verified first, then active markets"
                 >
                   <CloudDownload
                     className={clsx('w-3.5 h-3.5', downloadBusy && 'animate-pulse')}
                   />
-                  {downloadBusy ? 'Queueing…' : 'Verified first → Fly'}
+                  {downloadBusy ? 'Queueing…' : 'Mainnet only → Fly'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={downloadBusy}
+                  onClick={() => void runDownload('verified')}
+                  title="Only verified mainnet (≥3 ETH) — listings + art"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Verified only
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   disabled={downloadBusy}
                   onClick={() => void runDownload('enrich')}
-                  title="Fill real NFT art/traits — verified first, then others"
+                  title="Fill art/traits on mainnet collections that already have listings"
                 >
                   <Download className="w-3.5 h-3.5" />
                   Enrich art
@@ -675,28 +687,10 @@ export function AdminPage() {
                   variant="outline"
                   disabled={downloadBusy}
                   onClick={() => void runDownload('missing')}
-                  title="Listings for empty collections + art for stub-heavy ones"
+                  title="Fill empty / stub mainnet markets"
                 >
                   <Download className="w-3.5 h-3.5" />
                   Fill missing
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={downloadBusy}
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        'Queue listings for ALL collections (verified still go first in the queue)?'
-                      )
-                    ) {
-                      return
-                    }
-                    void runDownload('all')
-                  }}
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  All listings
                 </Button>
               </div>
             </div>

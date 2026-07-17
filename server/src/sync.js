@@ -36,20 +36,56 @@ export const VERIFIED_MIN_VOLUME_ETH = Number(
   process.env.VERIFIED_MIN_VOLUME_ETH || 3
 )
 
+/** OpenSea chain id for Robinhood mainnet (never testnet) */
+export const MAINNET_CHAIN = 'robinhood'
+
+/**
+ * Mainnet-only filter. OpenSea uses chain="robinhood" for mainnet.
+ * Rejects testnet / demo / non-RH chains.
+ */
+export function isMainnetCollection(c) {
+  if (!c) return false
+  const chain = String(c.chain || MAINNET_CHAIN).toLowerCase()
+  if (/testnet|sepolia|46630/.test(chain)) return false
+  // OpenSea mainnet identifier (and blank → treat as mainnet default)
+  if (chain && chain !== MAINNET_CHAIN && chain !== 'robinhood') return false
+  const slug = String(c.slug || '')
+  // Never index local OpenHood demo / testnet mint surface
+  if (/^openhood-testnet|^open-pixels$|^openhood-demo/i.test(slug)) return false
+  return true
+}
+
+/**
+ * Worth queuing for download: mainnet + real market signal
+ * (verified, volume, active listings, or hard priority slug).
+ * Skips empty spam shells with no activity.
+ */
+export function isMainnetMarketCollection(c) {
+  if (!isMainnetCollection(c)) return false
+  if (PRIORITY_SLUGS.includes(c.slug)) return true
+  if (isVerifiedCollection(c)) return true
+  const vol = Number(c.volumeTotal ?? c.volume_total ?? 0)
+  const vol24 = Number(c.volume24h ?? c.volume_24h ?? 0)
+  const listed = Number(c.listedCount ?? c.nfts?.length ?? 0)
+  return vol > 0 || vol24 > 0 || listed > 0
+}
+
 /**
  * Verified-first ordering for download/sync queues.
  * 1) verified (volumeTotal ≥ 3 ETH), highest volume first
  * 2) PRIORITY_SLUGS
  * 3) rest by listedCount / volume
+ * mainnetOnly=true (default) drops non-mainnet / empty spam
  */
 export function isVerifiedCollection(c) {
   if (!c) return false
+  if (!isMainnetCollection(c)) return false
   const vol = Number(c.volumeTotal ?? c.volume_total ?? 0)
   return Number.isFinite(vol) && vol >= VERIFIED_MIN_VOLUME_ETH
 }
 
 /** @returns {string[]} slugs ordered verified → priority → rest */
-export function slugsVerifiedFirst(slugs = defaultSlugs()) {
+export function slugsVerifiedFirst(slugs = defaultSlugs(), { mainnetOnly = true } = {}) {
   const set = new Set(slugs.filter(Boolean))
   const cols = listCollections()
   const bySlug = new Map(cols.map((c) => [c.slug, c]))
@@ -59,8 +95,13 @@ export function slugsVerifiedFirst(slugs = defaultSlugs()) {
   const rest = []
 
   for (const slug of set) {
-    const c = bySlug.get(slug)
-    if (c && isVerifiedCollection(c)) verified.push(slug)
+    const c = bySlug.get(slug) || { slug, chain: MAINNET_CHAIN }
+    if (mainnetOnly && !isMainnetCollection(c)) continue
+    if (mainnetOnly && !isMainnetMarketCollection(c) && !PRIORITY_SLUGS.includes(slug)) {
+      // still allow empty priority shells; skip pure spam shells
+      continue
+    }
+    if (isVerifiedCollection(c)) verified.push(slug)
     else if (PRIORITY_SLUGS.includes(slug)) priority.push(slug)
     else rest.push(slug)
   }
@@ -300,18 +341,17 @@ export function queueDepth() {
 }
 
 /**
- * Admin: queue OpenSea → Fly download for many collections.
- * Order always: **verified first** (≥3 ETH total vol) → priority → rest.
+ * Admin: queue OpenSea → Fly download (Robinhood MAINNET only).
+ * Order: verified first → priority → rest with market signal.
  * mode:
- *  - all / meta: listings-only for every slug (fast books)
- *  - verified: listings + full enrich for verified only, then listings for rest
- *  - enrich: art/traits for stub-heavy (verified first, cap)
- *  - missing: empty books + stub-heavy (verified first)
+ *  - mainnet (default): mainnet markets only, verified first, listings then enrich for verified
+ *  - verified: full for verified mainnet only (no spam tail)
+ *  - all / meta: all mainnet markets listings
+ *  - enrich / missing: as before, mainnet-only
  */
-export async function downloadAllContent({ mode = 'all' } = {}) {
+export async function downloadAllContent({ mode = 'mainnet' } = {}) {
   const beforeQ = queueDepth()
 
-  // If already a big backlog, don't pile on — report status instead
   if (beforeQ > 80 && mode !== 'enrich' && mode !== 'verified') {
     return {
       ok: true,
@@ -328,19 +368,17 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
 
   let discovered = 0
   try {
-    // Seed shells only — do not auto-enqueue here (we queue intentionally below)
     const slugsFound = await discoverPass({ enqueueNew: false })
     discovered = slugsFound?.length || 0
   } catch (e) {
     console.error('[download] discover', e?.message || e)
   }
 
-  // After discover, re-rank with latest volume stats where we have them
-  const ordered = slugsVerifiedFirst(defaultSlugs())
-  const verifiedSlugs = ordered.filter((slug) => {
-    const c = getCollection(slug)
-    return isVerifiedCollection(c)
-  })
+  // MAINNET markets only + verified first
+  const ordered = slugsVerifiedFirst(defaultSlugs(), { mainnetOnly: true })
+  const verifiedSlugs = ordered.filter((slug) =>
+    isVerifiedCollection(getCollection(slug))
+  )
 
   let queued = 0
   let metaQueued = 0
@@ -348,8 +386,8 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
   let verifiedQueued = 0
 
   if (mode === 'enrich') {
-    // Art + traits — verified first, then highest listed
     const cols = listCollections()
+      .filter((c) => isMainnetCollection(c))
       .map((c) => {
         const nfts = c.nfts || []
         const listed = nfts.length || c.listedCount || 0
@@ -398,7 +436,7 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
       }
     }
   } else if (mode === 'verified') {
-    // Phase 1: verified — listings + full enrich (front of queue)
+    // Verified mainnet only — full listings + art (no long spam tail)
     for (const slug of verifiedSlugs) {
       enqueueSync(slug, { full: false, front: true })
       enqueueSync(slug, { full: true, front: true })
@@ -407,21 +445,21 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
       verifiedQueued++
       queued += 2
     }
-    // Phase 2: everyone else — listings only (back of queue)
+  } else if (mode === 'mainnet' || mode === 'all' || mode === 'meta') {
+    // Mainnet markets: verified get listings+art first; rest get listings
+    for (const slug of verifiedSlugs) {
+      enqueueSync(slug, { full: false, front: true })
+      enqueueSync(slug, { full: true, front: true })
+      metaQueued++
+      fullQueued++
+      verifiedQueued++
+      queued += 2
+    }
     for (const slug of ordered) {
       if (verifiedSlugs.includes(slug)) continue
       enqueueSync(slug, { full: false })
       metaQueued++
       queued++
-    }
-  } else {
-    // all / meta — listings for whole chain, verified first at front
-    for (const slug of ordered) {
-      const verified = verifiedSlugs.includes(slug)
-      enqueueSync(slug, { full: false, front: verified })
-      metaQueued++
-      queued++
-      if (verified) verifiedQueued++
     }
   }
 
@@ -430,21 +468,24 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
     lastDownloadMode: mode,
     lastDownloadQueued: queued,
     lastVerifiedQueued: verifiedQueued,
+    lastDownloadMainnetOnly: true,
   })
 
   const q = queueDepth()
-  let message =
+  const message =
     mode === 'enrich'
-      ? `Queued ${fullQueued} art/traits jobs (verified first, ${verifiedQueued} verified). Queue ${q}.`
+      ? `Mainnet enrich: ${fullQueued} art jobs (${verifiedQueued} verified first). Queue ${q}.`
       : mode === 'missing'
-        ? `Queued ${metaQueued} listing + ${fullQueued} enrich jobs (verified first). Queue ${q}.`
+        ? `Mainnet missing: ${metaQueued} listing + ${fullQueued} enrich. Queue ${q}.`
         : mode === 'verified'
-          ? `Verified first: ${verifiedQueued} verified collections (listings+art), then listings for the rest. Queue ${q}.`
-          : `Queued ${metaQueued} listings downloads — verified (${verifiedQueued}) first, then the rest. Queue ${q}.`
+          ? `Mainnet verified only: ${verifiedQueued} collections (listings+art). Queue ${q}.`
+          : `Mainnet only: ${verifiedQueued} verified first (listings+art), then ${metaQueued - verifiedQueued} other mainnet markets (listings). Queue ${q}.`
 
   return {
     ok: true,
     mode,
+    chain: MAINNET_CHAIN,
+    mainnetOnly: true,
     discovered,
     slugCount: ordered.length,
     verifiedCount: verifiedSlugs.length,

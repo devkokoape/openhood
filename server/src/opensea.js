@@ -191,19 +191,26 @@ export async function fetchCollection(slug) {
 }
 
 /**
- * Discover ALL OpenSea collections on Robinhood chain (paginated).
- * Returns lightweight rows: { slug, name, image, banner, contracts, total_supply }
+ * Discover OpenSea collections on Robinhood MAINNET only (chain=robinhood).
+ * Never pulls testnet. Returns lightweight rows for indexer seed.
  */
 export async function fetchAllRobinhoodCollections({
   maxPages = 30,
   pageSize = 100,
+  chain = 'robinhood',
 } = {}) {
   const out = []
   const seen = new Set()
   let next = undefined
+  // Force mainnet OpenSea chain id
+  const chainId = chain === 'robinhood' || !chain ? 'robinhood' : chain
+  if (/testnet|sepolia|46630/i.test(chainId)) {
+    console.warn('[discover] refusing testnet chain', chainId)
+    return []
+  }
 
   for (let page = 0; page < maxPages; page++) {
-    let path = `/collections?chain=robinhood&limit=${pageSize}&order_by=seven_day_volume`
+    let path = `/collections?chain=${encodeURIComponent(chainId)}&limit=${pageSize}&order_by=seven_day_volume`
     if (next) path += `&next=${encodeURIComponent(next)}`
     const data = await openSeaGet(path)
     const rows = data?.collections || []
@@ -211,6 +218,10 @@ export async function fetchAllRobinhoodCollections({
     for (const c of rows) {
       const slug = c.collection || c.slug
       if (!slug || seen.has(slug)) continue
+      const contractChain = String(c.contracts?.[0]?.chain || chainId).toLowerCase()
+      if (/testnet|sepolia|46630/.test(contractChain)) continue
+      // Only accept robinhood mainnet contracts
+      if (contractChain && contractChain !== 'robinhood') continue
       seen.add(slug)
       out.push({
         slug,
@@ -219,7 +230,7 @@ export async function fetchAllRobinhoodCollections({
         banner: c.banner_image_url || c.image_url || '',
         description: c.description || '',
         contractAddress: c.contracts?.[0]?.address || null,
-        chain: c.contracts?.[0]?.chain || 'robinhood',
+        chain: 'robinhood',
         items: c.total_supply || c.unique_item_count || 0,
         owner: c.owner || null,
         openseaUrl: c.opensea_url || `https://opensea.io/collection/${slug}`,
@@ -229,7 +240,7 @@ export async function fetchAllRobinhoodCollections({
     if (!next) break
     await sleep(150)
   }
-  console.log(`[discover] robinhood collections: ${out.length}`)
+  console.log(`[discover] robinhood MAINNET collections: ${out.length}`)
   return out
 }
 
