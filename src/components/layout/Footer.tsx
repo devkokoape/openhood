@@ -36,6 +36,8 @@ const resources = [
   },
 ]
 
+// Admin is intentionally not linked in the public footer.
+
 export function Footer() {
   return (
     <footer className="mt-auto border-t border-edge bg-surface-2 pb-safe">

@@ -15,21 +15,37 @@ import clsx from 'clsx'
 import { useTheme } from '../../context/ThemeContext'
 import { ConnectWallet } from '../wallet/ConnectWallet'
 import { NetworkBadge } from '../wallet/NetworkBadge'
+import {
+  isAdminAuthenticated,
+  onAdminAuthChange,
+} from '../../lib/adminAuth'
 
-const links = [
+const publicLinks = [
   { to: '/', label: 'Discover', end: true, icon: Layers },
   { to: '/collections', label: 'Collections', end: false, icon: Layers },
   { to: '/rankings', label: 'Rankings', end: false, icon: Activity },
   { to: '/degen', label: 'Degen', end: false, icon: Zap },
   { to: '/activity', label: 'Activity', end: false, icon: Activity },
-  { to: '/admin', label: 'Admin', end: false, icon: Activity },
 ]
 
 export function Navbar() {
   const { theme, toggle } = useTheme()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [isAdmin, setIsAdmin] = useState(() => isAdminAuthenticated())
   const navigate = useNavigate()
+
+  useEffect(() => {
+    setIsAdmin(isAdminAuthenticated())
+    return onAdminAuthChange(() => setIsAdmin(isAdminAuthenticated()))
+  }, [])
+
+  const links = isAdmin
+    ? [
+        ...publicLinks,
+        { to: '/admin', label: 'Admin', end: false, icon: Activity },
+      ]
+    : publicLinks
 
   useEffect(() => {
     if (!open) return
