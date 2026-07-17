@@ -367,6 +367,7 @@ export function useOpenSeaCollectionNfts(
                   ...n,
                   collectionId: colId,
                   id: `${colId}-os-${n.tokenId}`,
+                  traits: Array.isArray(n.traits) ? n.traits : [],
                 }))
                 setNfts(mapped)
                 setListedCount(again.listedCount || mapped.length)
