@@ -352,8 +352,11 @@ const server = http.createServer(async (req, res) => {
             realTraits.length === 0
           )
         }).length
-        if (stubs > 5) enqueueSync(slug, { full: true })
-      } else {
+        // Only re-queue when many stubs remain and queue is not already huge
+        if (stubs > 5 && queueDepth() < 80) {
+          enqueueSync(slug, { full: true })
+        }
+      } else if (!row || row.indexPhase === undefined || !row.syncedAt) {
         // Not indexed yet: try quick meta sync with hard timeout, else 202
         try {
           row = await Promise.race([
@@ -362,9 +365,11 @@ const server = http.createServer(async (req, res) => {
               setTimeout(() => rej(new Error('meta timeout')), 12_000)
             ),
           ])
-          enqueueSync(slug, { full: true }) // art fills in background
+          if (row?.nfts?.length && queueDepth() < 100) {
+            enqueueSync(slug, { full: true }) // art fills in background
+          }
         } catch (e) {
-          enqueueSync(slug, { full: true, front: true })
+          if (queueDepth() < 100) enqueueSync(slug, { full: true, front: true })
           return json(
             res,
             202,
@@ -382,9 +387,42 @@ const server = http.createServer(async (req, res) => {
             0
           )
         }
+      } else if (row && !row.nfts?.length) {
+        // Already have a synced empty shell — don't re-block on OpenSea every request
+        // fall through to empty response below
       }
 
       if (!row?.nfts?.length) {
+        // Already synced empty book (0 listings) — return 200 so clients stop polling
+        const phase = row?.indexPhase || ''
+        const emptyDone =
+          phase === 'meta-empty-book' ||
+          phase === 'meta-error' ||
+          phase === 'discovered' ||
+          (row && row.syncedAt)
+        if (emptyDone && row) {
+          return json(
+            res,
+            200,
+            {
+              ...summarize(row),
+              description: row.description,
+              indexPhase: row.indexPhase || phase,
+              indexing: false,
+              empty: true,
+              nfts: [],
+              nftsTotal: 0,
+              listedCount: 0,
+              activities: row.activities || [],
+              offers: row.offers || [],
+              message:
+                phase === 'meta-empty-book'
+                  ? 'No active listings for this collection.'
+                  : undefined,
+            },
+            15
+          )
+        }
         return json(res, 202, {
           indexing: true,
           slug,

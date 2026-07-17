@@ -228,6 +228,25 @@ export async function putCollectionStore(
   })
 }
 
+function isRealArt(img?: string): boolean {
+  if (!img) return false
+  if (img.includes('dicebear') || img.startsWith('data:image/svg')) return false
+  if (img.includes('seed=openhood')) return false
+  return true
+}
+
+function realTraitScore(
+  traits?: { trait_type: string; value: string }[]
+): number {
+  if (!Array.isArray(traits) || !traits.length) return 0
+  return traits.filter(
+    (t) =>
+      t?.trait_type &&
+      t.trait_type !== 'Status' &&
+      t.trait_type !== 'Token ID'
+  ).length
+}
+
 function mergeNftsPreferEnriched(prev: Nft[], next: Nft[]): Nft[] {
   const map = new Map<string, Nft>()
   for (const n of prev) map.set(n.id, n)
@@ -237,17 +256,16 @@ function mergeNftsPreferEnriched(prev: Nft[], next: Nft[]): Nft[] {
       map.set(n.id, n)
       continue
     }
+    const nextArt = isRealArt(n.image)
+    const oldArt = isRealArt(old.image)
+    const nextTs = realTraitScore(n.traits)
+    const oldTs = realTraitScore(old.traits)
     map.set(n.id, {
       ...old,
       ...n,
-      image:
-        n.image && !n.image.includes('dicebear')
-          ? n.image
-          : old.image && !old.image.includes('dicebear')
-            ? old.image
-            : n.image || old.image,
+      image: nextArt ? n.image : oldArt ? old.image : n.image || old.image,
       name: n.name && !n.name.startsWith('#') ? n.name : old.name || n.name,
-      traits: (n.traits?.length || 0) > (old.traits?.length || 0) ? n.traits : old.traits,
+      traits: nextTs > oldTs ? n.traits : oldTs > 0 ? old.traits : n.traits || old.traits,
       rarityRank: n.rarityRank ?? old.rarityRank,
       owner:
         n.owner && n.owner !== 'unknown' ? n.owner : old.owner || n.owner,

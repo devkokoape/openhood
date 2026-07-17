@@ -209,11 +209,17 @@ export function mapOpenSeaToCollection(
   const banner = isVideoMediaUrl(rawBanner)
     ? rawBanner
     : upgradeOpenSeaImageUrl(rawBanner, 1920) || rawBanner
+  const slug = row.slug || c.collection
+  // Always os-${slug} so snapshot/live/indexer share one id scheme
+  const id =
+    idPrefix === 'os' || !idPrefix
+      ? `os-${slug}`
+      : `${idPrefix}-${slug}`
 
   const base: Collection = {
-    id: `${idPrefix}-${row.slug}`,
+    id,
     name: c.name,
-    slug: row.slug || c.collection,
+    slug,
     description:
       c.description ||
       `${c.name} on Robinhood Chain — live stats from OpenSea.`,
@@ -230,7 +236,7 @@ export function mapOpenSeaToCollection(
     discord: c.discord_url || undefined,
     // verified is set by indexer policy (OpenSea + ≥3 ETH volume), not OS safelist alone
     verified: false,
-    openseaUrl: c.opensea_url || `https://opensea.io/collection/${row.slug}`,
+    openseaUrl: c.opensea_url || `https://opensea.io/collection/${slug}`,
     chain: contract?.chain || 'robinhood',
     contractAddress: contract?.address,
     salesTotal: s.total?.sales,
@@ -253,7 +259,8 @@ export function collectionsFromOpenSeaSnapshot(): Collection[] {
   const rows = snapshot as OpenSeaSnapshotRow[]
   return rows
     .filter((r) => r.stats?.total && r.collection?.name)
-    .map((r, i) => mapOpenSeaToCollection(r, `os${i + 1}`))
+    // Canonical id: os-${slug} (must match live discovery / Fly / NFT ids)
+    .map((r) => mapOpenSeaToCollection(r, 'os'))
     .sort((a, b) => b.volume24h - a.volume24h)
 }
 
@@ -911,14 +918,36 @@ export function hasRealNftTraits(
   )
 }
 
-export function nftNeedsMetadata(
+/** Needs art/name fill (always re-fetch until real image). */
+export function nftNeedsArt(
   n: Nft,
   collectionImage?: string | null
 ): boolean {
   if (isPlaceholderNftImage(n.image, collectionImage)) return true
-  if (!n.name || n.name.startsWith('#')) return true
-  // Prefer re-fetch when traits are missing (filters). Pre-reveal may stay empty.
-  if (!hasRealNftTraits(n.traits)) return true
+  if (!n.name || n.name === `#${n.tokenId}`) return true
+  return false
+}
+
+/**
+ * Needs OpenSea metadata fill.
+ * Art always; traits only when still on listing stubs (Status/Token ID).
+ * Pre-reveal collections with real art but empty traits stop thrashing.
+ */
+export function nftNeedsMetadata(
+  n: Nft,
+  collectionImage?: string | null
+): boolean {
+  if (nftNeedsArt(n, collectionImage)) return true
+  // Only force trait re-fetch when we still have synthetic listing stubs
+  const traits = Array.isArray(n.traits) ? n.traits : []
+  if (
+    traits.length > 0 &&
+    traits.every(
+      (t) => t.trait_type === 'Status' || t.trait_type === 'Token ID'
+    )
+  ) {
+    return true
+  }
   return false
 }
 

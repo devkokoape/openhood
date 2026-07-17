@@ -403,7 +403,24 @@ export function dbReplaceNfts(slug, nfts, collectionId) {
         insert.run(row)
       }
     }
-    // Keep historical NFT rows for refresh-safe detail pages (no delete of unlisted).
+    // Mark tokens no longer in the active listing set as unlisted (no ghost floors)
+    const activeIds = (nfts || []).map((n) => String(n.tokenId))
+    if (activeIds.length) {
+      const placeholders = activeIds.map(() => '?').join(',')
+      database
+        .prepare(
+          `UPDATE nfts SET listed = 0, price = NULL, updated_at = ?
+           WHERE slug = ? AND listed = 1 AND token_id NOT IN (${placeholders})`
+        )
+        .run(now, slug, ...activeIds)
+    } else {
+      // Empty book: unlist everything for this slug
+      database
+        .prepare(
+          `UPDATE nfts SET listed = 0, price = NULL, updated_at = ? WHERE slug = ? AND listed = 1`
+        )
+        .run(now, slug)
+    }
     database.exec('COMMIT')
   } catch (e) {
     try {
@@ -413,6 +430,17 @@ export function dbReplaceNfts(slug, nfts, collectionId) {
     }
     throw e
   }
+}
+
+/** Listed inventory only (for API / cache — not historical unlisted rows). */
+export function dbListListedNfts(slug) {
+  return getDb()
+    .prepare(
+      `SELECT * FROM nfts WHERE slug = ? AND listed = 1 ORDER BY
+        CASE WHEN price IS NULL THEN 1 ELSE 0 END, price ASC`
+    )
+    .all(slug)
+    .map(rowToNft)
 }
 
 export function dbPatchNfts(slug, patchesByToken) {
@@ -470,17 +498,21 @@ export function dbPatchNfts(slug, patchesByToken) {
   return n
 }
 
-export function dbGetCollection(slug, { includeNfts = true } = {}) {
+export function dbGetCollection(slug, { includeNfts = true, listedOnly = true } = {}) {
   const row = getDb().prepare('SELECT * FROM collections WHERE slug = ?').get(slug)
   if (!row) return null
   let nfts = []
   if (includeNfts) {
+    // Default: active book only (listed=1). Avoids ghost listings after delist.
     nfts = getDb()
       .prepare(
-        `SELECT * FROM nfts WHERE slug = ?
-         ORDER BY listed DESC,
-           CASE WHEN price IS NULL THEN 1 ELSE 0 END,
-           price ASC`
+        listedOnly
+          ? `SELECT * FROM nfts WHERE slug = ? AND listed = 1
+             ORDER BY CASE WHEN price IS NULL THEN 1 ELSE 0 END, price ASC`
+          : `SELECT * FROM nfts WHERE slug = ?
+             ORDER BY listed DESC,
+               CASE WHEN price IS NULL THEN 1 ELSE 0 END,
+               price ASC`
       )
       .all(slug)
       .map(rowToNft)

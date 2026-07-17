@@ -19,18 +19,25 @@ export async function openSeaGet(path, attempt = 0) {
   const url = `${OPENSEA_HOST}${path.startsWith('/') ? path : `/${path}`}`
   try {
     const res = await fetch(url, { headers: headers() })
-    if ((res.status === 429 || res.status >= 500) && attempt < 3) {
-      await sleep(400 * (attempt + 1))
+    if ((res.status === 429 || res.status >= 500) && attempt < 5) {
+      // Back off harder on rate limits so we don't truncate listing books
+      await sleep(600 * (attempt + 1) + (res.status === 429 ? 1500 : 0))
       return openSeaGet(path, attempt + 1)
     }
-    if (!res.ok) return null
+    if (res.status === 404) return null
+    if (!res.ok) {
+      const err = new Error(`OpenSea ${res.status} ${path}`)
+      err.status = res.status
+      throw err
+    }
     return await res.json()
-  } catch {
+  } catch (e) {
+    if (e?.status) throw e // propagate 4xx/5xx after retries
     if (attempt < 2) {
-      await sleep(300)
+      await sleep(400)
       return openSeaGet(path, attempt + 1)
     }
-    return null
+    throw e
   }
 }
 
@@ -49,6 +56,20 @@ export function parseListing(L) {
   const raw = L.price?.current?.value
   const dec = L.price?.current?.decimals ?? 18
   if (raw != null) eth = Number(raw) / 10 ** dec
+  // Fallback: sum consideration (same as client) when price.current missing
+  if ((!Number.isFinite(eth) || eth <= 0) && L.protocol_data?.parameters?.consideration) {
+    try {
+      let wei = 0n
+      for (const c of L.protocol_data.parameters.consideration) {
+        if (c.itemType === 0 || c.itemType === '0') {
+          wei += BigInt(c.startAmount || c.endAmount || 0)
+        }
+      }
+      if (wei > 0n) eth = Number(wei) / 1e18
+    } catch {
+      /* ignore */
+    }
+  }
   if (!Number.isFinite(eth) || eth <= 0) return null
 
   return {
@@ -62,16 +83,34 @@ export function parseListing(L) {
   }
 }
 
-/** Full best-listings book (limit 200 pages). */
+/**
+ * Full best-listings book.
+ * Returns { listings, complete } — complete=false if rate-limited mid-fetch
+ * so callers do NOT overwrite a larger previous book with a thin partial.
+ */
 export async function fetchAllBestListings(slug, { maxPages = 80, onPage } = {}) {
   const all = []
   const seen = new Set()
   let next = undefined
+  let complete = true
 
   for (let page = 0; page < maxPages; page++) {
     let path = `/listings/collection/${encodeURIComponent(slug)}/best?limit=200`
     if (next) path += `&next=${encodeURIComponent(next)}`
-    const data = await openSeaGet(path)
+    let data
+    try {
+      data = await openSeaGet(path)
+    } catch (e) {
+      console.warn(`[listings] ${slug} page ${page}: ${e?.message || e}`)
+      complete = false
+      break
+    }
+    if (!data) {
+      // true empty page = end of book only when first page
+      if (page === 0) complete = true
+      else complete = false
+      break
+    }
     const rows = data?.listings || []
     if (!rows.length) break
 
@@ -91,18 +130,26 @@ export async function fetchAllBestListings(slug, { maxPages = 80, onPage } = {})
     onPage?.(batch, all.length)
     next = data?.next
     if (!next) break
-    await sleep(80)
+    await sleep(100)
   }
 
+  if (next) complete = false // hit maxPages mid-book
+
   all.sort((a, b) => a.priceEth - b.priceEth)
+  // Back-compat: array-like + metadata
+  all.complete = complete
   return all
 }
 
 export async function fetchCollectionEvents(slug, limit = 50) {
-  const data = await openSeaGet(
-    `/events/collection/${encodeURIComponent(slug)}?limit=${Math.min(50, limit)}`
-  )
-  return data?.asset_events || []
+  try {
+    const data = await openSeaGet(
+      `/events/collection/${encodeURIComponent(slug)}?limit=${Math.min(50, limit)}`
+    )
+    return data?.asset_events || []
+  } catch {
+    return []
+  }
 }
 
 export async function fetchCollectionOffers(slug, maxPages = 3) {
@@ -111,7 +158,12 @@ export async function fetchCollectionOffers(slug, maxPages = 3) {
   for (let page = 0; page < maxPages; page++) {
     let path = `/offers/collection/${encodeURIComponent(slug)}?limit=50`
     if (next) path += `&next=${encodeURIComponent(next)}`
-    const data = await openSeaGet(path)
+    let data
+    try {
+      data = await openSeaGet(path)
+    } catch {
+      break
+    }
     const rows = data?.offers || []
     if (!rows.length) break
     all.push(...rows)
@@ -123,11 +175,19 @@ export async function fetchCollectionOffers(slug, maxPages = 3) {
 }
 
 export async function fetchCollectionStats(slug) {
-  return openSeaGet(`/collections/${encodeURIComponent(slug)}/stats`)
+  try {
+    return await openSeaGet(`/collections/${encodeURIComponent(slug)}/stats`)
+  } catch {
+    return null
+  }
 }
 
 export async function fetchCollection(slug) {
-  return openSeaGet(`/collections/${encodeURIComponent(slug)}`)
+  try {
+    return await openSeaGet(`/collections/${encodeURIComponent(slug)}`)
+  } catch {
+    return null
+  }
 }
 
 /**

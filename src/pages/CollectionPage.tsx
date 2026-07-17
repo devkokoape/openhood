@@ -254,6 +254,8 @@ export function CollectionPage() {
       setFilters({ [trait]: [value] })
       setTab('items')
     }
+    // Only clear filters when URL explicitly had trait and it was removed
+    // (don't wipe multi-select filters that aren't mirrored in the URL)
     if (searchParams.get('sweep') === '1') {
       setSweepMode(true)
       setTab('items')
@@ -1215,7 +1217,10 @@ export function CollectionPage() {
                   </div>
                 )}
                 {colOffers.map((o) => {
-                  const nft = o.nftId ? nfts.find((n) => n.id === o.nftId) : undefined
+                  const nft = o.nftId
+                    ? collectionNfts.find((n) => n.id === o.nftId) ||
+                      nfts.find((n) => n.id === o.nftId)
+                    : undefined
                   return (
                     <div
                       key={o.id}

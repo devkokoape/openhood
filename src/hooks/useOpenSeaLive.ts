@@ -101,15 +101,31 @@ function mergeBySlug(
       continue
     }
     // Prefer richer image / higher volume / more items
+    // Freeze id from first write so NFT ids / hooks don't remount mid-session
     map.set(c.slug, {
       ...prev,
       ...c,
-      image: c.image && !c.image.includes('dicebear') ? c.image : prev.image,
+      id: prev.id || c.id,
+      slug: prev.slug || c.slug,
+      image:
+        c.image && !c.image.includes('dicebear') && c.image
+          ? c.image
+          : prev.image,
       banner:
         c.banner && !c.banner.includes('dicebear') ? c.banner : prev.banner,
-      floorPrice: Math.max(c.floorPrice || 0, prev.floorPrice || 0) || c.floorPrice || prev.floorPrice,
-      volume24h: Math.max(c.volume24h || 0, prev.volume24h || 0),
-      volumeTotal: Math.max(c.volumeTotal || 0, prev.volumeTotal || 0),
+      // Prefer non-zero fresher stats; allow floors/volumes to drop when both known
+      floorPrice:
+        c.floorPrice != null && c.floorPrice > 0
+          ? c.floorPrice
+          : prev.floorPrice,
+      volume24h:
+        c.volume24h != null && (c.volume24h > 0 || prev.volume24h === 0)
+          ? c.volume24h
+          : prev.volume24h,
+      volumeTotal:
+        c.volumeTotal != null && c.volumeTotal > 0
+          ? c.volumeTotal
+          : prev.volumeTotal,
       items: Math.max(c.items || 0, prev.items || 0),
       owners: Math.max(c.owners || 0, prev.owners || 0),
       contractAddress: c.contractAddress || prev.contractAddress,
@@ -151,11 +167,6 @@ export function useOpenSeaLive() {
   const collections = useMemo(
     () => mergeOpenSeaPatches(catalog, patches),
     [catalog, patches]
-  )
-
-  const slugs = useMemo(
-    () => collections.map((c) => c.slug).filter(Boolean),
-    [collections]
   )
 
   /** Discover every RH collection + pull Fly catalog */
@@ -204,13 +215,19 @@ export function useOpenSeaLive() {
     }
   }, [])
 
+  // Stable refs so intervals don't restart every stats patch (OpenSea thrash)
+  const collectionsRef = useRef(collections)
+  collectionsRef.current = collections
+  const seedSlugsLen = seedSlugs.length
+
   const refreshStats = useCallback(async () => {
-    if (busy.current || slugs.length === 0) return
+    if (busy.current) return
+    const cols = collectionsRef.current
+    if (!cols.length) return
     busy.current = true
     setStatus((s) => ({ ...s, refreshing: true }))
     try {
-      // Stats for top-volume + any missing floor first (cap to avoid rate limits)
-      const ranked = [...collections]
+      const ranked = [...cols]
         .filter((c) => c.source === 'opensea')
         .sort((a, b) => b.volume24h - a.volume24h)
       const needFloor = ranked.filter((c) => !c.floorPrice).slice(0, 30)
@@ -243,8 +260,7 @@ export function useOpenSeaLive() {
           ...s,
           refreshing: false,
           hasApiKey: hasOpenSeaApiKey(),
-          // Keep live if we already have catalog
-          live: s.live || seedSlugs.length > 0,
+          live: s.live || seedSlugsLen > 0,
         }))
       }
     } catch (e) {
@@ -257,13 +273,13 @@ export function useOpenSeaLive() {
     } finally {
       busy.current = false
     }
-  }, [slugs, collections, seedSlugs.length])
+  }, [seedSlugsLen])
 
   const refreshEvents = useCallback(async () => {
     if (!hasOpenSeaApiKey() || eventsBusy.current) return
     eventsBusy.current = true
     try {
-      const ranked = [...collections]
+      const ranked = [...collectionsRef.current]
         .filter((c) => c.source === 'opensea')
         .sort((a, b) => b.volume24h - a.volume24h)
         .slice(0, 6)
@@ -286,7 +302,7 @@ export function useOpenSeaLive() {
     } finally {
       eventsBusy.current = false
     }
-  }, [collections])
+  }, [])
 
   // Discover full RH catalog once + periodically
   useEffect(() => {
@@ -298,7 +314,7 @@ export function useOpenSeaLive() {
     return () => window.clearInterval(id)
   }, [runDiscovery])
 
-  // Stats loop
+  // Stats loop — stable callback (no thrash on patch)
   useEffect(() => {
     void refreshStats()
     const id = window.setInterval(

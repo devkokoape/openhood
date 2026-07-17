@@ -41,6 +41,8 @@ export function buildTraitStats(nfts: Nft[]): TraitTypeStat[] {
   for (const nft of nfts) {
     for (const t of safeTraits(nft)) {
       if (t?.trait_type == null || t?.value == null) continue
+      // Skip listing stub traits (not real NFT attributes)
+      if (t.trait_type === 'Status' || t.trait_type === 'Token ID') continue
       if (!map.has(t.trait_type)) map.set(t.trait_type, new Map())
       const vals = map.get(t.trait_type)!
       const cur = vals.get(String(t.value)) || { count: 0, floors: [] }

@@ -256,17 +256,107 @@ export async function syncSlugMeta(slug) {
   const t0 = Date.now()
   console.log(`[sync:meta] start ${slug}`)
   const collectionId = `os-${slug}`
+  const prev = getCollection(slug)
 
-  const [listings, events, offerRows, stats, colMeta] = await Promise.all([
-    fetchAllBestListings(slug, { maxPages: 80 }),
-    fetchCollectionEvents(slug, 50),
-    fetchCollectionOffers(slug, 3),
-    fetchCollectionStats(slug),
-    fetchCollection(slug),
-  ])
+  let listings = []
+  let listingsComplete = true
+  let events = []
+  let offerRows = []
+  let stats = null
+  let colMeta = null
+  try {
+    ;[listings, events, offerRows, stats, colMeta] = await Promise.all([
+      fetchAllBestListings(slug, { maxPages: 80 }),
+      fetchCollectionEvents(slug, 50).catch(() => []),
+      fetchCollectionOffers(slug, 3).catch(() => []),
+      fetchCollectionStats(slug).catch(() => null),
+      fetchCollection(slug).catch(() => null),
+    ])
+    listingsComplete = listings.complete !== false
+  } catch (e) {
+    console.warn(`[sync:meta] ${slug} fetch error:`, e?.message || e)
+    if (prev?.nfts?.length) {
+      console.warn(`[sync:meta] ${slug}: keep previous after error`)
+      return prev
+    }
+    // Unknown / dead slug — shell only, mark empty-complete so API stops 202-looping
+    const row = {
+      slug,
+      collectionId,
+      name: slug,
+      image: '',
+      banner: '',
+      description: '',
+      contractAddress: null,
+      chain: 'robinhood',
+      floorPrice: 0,
+      volume24h: 0,
+      volumeTotal: 0,
+      owners: 0,
+      items: 0,
+      listedCount: 0,
+      listedPct: 0,
+      nfts: [],
+      activities: [],
+      offers: [],
+      prices: [],
+      source: 'opensea',
+      syncedAt: new Date().toISOString(),
+      syncMs: Date.now() - t0,
+      indexPhase: 'meta-error',
+    }
+    putCollection(slug, row)
+    return row
+  }
+
+  // CRITICAL: never overwrite a fat book with a thin partial (rate limit / mid-page fail)
+  if (
+    prev?.nfts?.length &&
+    (!listingsComplete ||
+      (listings.length > 0 &&
+        listings.length < prev.nfts.length * 0.5 &&
+        prev.nfts.length > 20))
+  ) {
+    console.warn(
+      `[sync:meta] ${slug}: partial listings ${listings.length} vs prev ${prev.nfts.length} (complete=${listingsComplete}) — keep previous NFTs, update stats only`
+    )
+    const floor = stats?.total?.floor_price ?? prev.floorPrice ?? 0
+    const volume24h =
+      stats?.intervals?.find((i) => i.interval === 'one_day')?.volume ??
+      prev.volume24h ??
+      0
+    const volumeTotal = stats?.total?.volume ?? prev.volumeTotal ?? 0
+    const next = {
+      ...prev,
+      name: colMeta?.name || prev.name,
+      image: colMeta?.image_url || prev.image,
+      banner: colMeta?.banner_image_url || prev.banner || prev.image,
+      floorPrice: +Number(floor).toPrecision(6),
+      volume24h: +Number(volume24h).toPrecision(6),
+      volumeTotal: +Number(volumeTotal).toPrecision(6),
+      owners: stats?.total?.num_owners ?? prev.owners,
+      items:
+        colMeta?.total_supply ||
+        colMeta?.unique_item_count ||
+        prev.items,
+      contractAddress:
+        colMeta?.contracts?.[0]?.address || prev.contractAddress,
+      activities: events?.length
+        ? mapEvents(slug, collectionId, events)
+        : prev.activities,
+      offers: offerRows?.length
+        ? mapOffers(collectionId, offerRows)
+        : prev.offers,
+      syncedAt: new Date().toISOString(),
+      syncMs: Date.now() - t0,
+      indexPhase: 'meta-partial-kept',
+    }
+    // stats-only write without wiping nfts
+    putCollection(slug, next)
+    return next
+  }
 
   if (!listings.length) {
-    const prev = getCollection(slug)
     if (prev?.nfts?.length) {
       console.warn(`[sync:meta] ${slug}: empty listings, keep previous`)
       return prev
@@ -323,7 +413,6 @@ export async function syncSlugMeta(slug) {
   const items = colMeta?.total_supply || colMeta?.unique_item_count || 0
 
   // Merge with previous enriched art when re-syncing meta
-  const prev = getCollection(slug)
   let nfts = listingsToNfts(listings, collectionId, { name })
   if (prev?.nfts?.length) {
     const byTok = new Map(prev.nfts.map((n) => [String(n.tokenId), n]))
@@ -334,13 +423,21 @@ export async function syncSlugMeta(slug) {
       const keepImg =
         oldImg &&
         !String(oldImg).includes('dicebear') &&
+        !String(oldImg).startsWith('data:image/svg') &&
         !/image_type_(logo|hero)/i.test(oldImg)
+      const oldTraits = Array.isArray(old.traits) ? old.traits : []
+      const realOld = oldTraits.filter(
+        (t) =>
+          t?.trait_type &&
+          t.trait_type !== 'Status' &&
+          t.trait_type !== 'Token ID'
+      )
       return {
         ...n,
         name: old.name && !String(old.name).startsWith('#') ? old.name : n.name,
         image: keepImg ? oldImg : n.image,
         owner: old.owner && old.owner !== 'unknown' ? old.owner : n.owner,
-        traits: (old.traits?.length || 0) > 2 ? old.traits : n.traits,
+        traits: realOld.length ? oldTraits : n.traits,
         rarityRank: old.rarityRank ?? n.rarityRank,
       }
     })

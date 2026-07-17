@@ -261,9 +261,8 @@ export function useOpenSeaCollectionNfts(
             seenIds.current = new Set(nftsMapped.map((n) => n.id))
             setNfts(nftsMapped)
             setListedCount(
-              remote.listedCount ||
-                (remote as { nftsTotal?: number }).nftsTotal ||
-                nftsMapped.length
+              remote.listedCount ??
+                nftsMapped.filter((n) => n.listed).length
             )
             setTotalLoaded(nftsMapped.length)
             setHasMore(Boolean((remote as { hasMore?: boolean }).hasMore))
@@ -456,24 +455,67 @@ export function useOpenSeaCollectionNfts(
                   })
                   if (!again?.nfts?.length) continue
                   const mapped = mapRemote(again.nfts)
-                  // merge by token
-                  const byTok = new Map(nftsMapped.map((n) => [String(n.tokenId), n]))
-                  for (const n of mapped) {
-                    const prev = byTok.get(String(n.tokenId))
-                    if (!prev || nftNeedsMetadata(prev, fallbackImage)) {
-                      byTok.set(String(n.tokenId), n)
-                    } else if (
-                      nftNeedsMetadata(n, fallbackImage) === false &&
-                      nftNeedsMetadata(prev, fallbackImage)
-                    ) {
-                      byTok.set(String(n.tokenId), n)
+                  // Field-level merge — never clobber good client art/traits with stubs
+                  setNfts((prevList) => {
+                    const byTok = new Map(
+                      prevList.map((n) => [String(n.tokenId), n])
+                    )
+                    for (const n of mapped) {
+                      const prev = byTok.get(String(n.tokenId))
+                      if (!prev) {
+                        byTok.set(String(n.tokenId), n)
+                        continue
+                      }
+                      const prevNeeds = nftNeedsMetadata(prev, fallbackImage)
+                      const nextGood = !nftNeedsMetadata(n, fallbackImage)
+                      if (prevNeeds && nextGood) {
+                        byTok.set(String(n.tokenId), {
+                          ...prev,
+                          ...n,
+                          image:
+                            n.image &&
+                            !n.image.includes('dicebear') &&
+                            !n.image.startsWith('data:image/svg')
+                              ? n.image
+                              : prev.image,
+                          traits:
+                            Array.isArray(n.traits) && n.traits.length > 2
+                              ? n.traits
+                              : prev.traits,
+                        })
+                      } else if (prevNeeds) {
+                        // both incomplete — keep better image if any
+                        byTok.set(String(n.tokenId), {
+                          ...prev,
+                          price: n.price ?? prev.price,
+                          listed: n.listed ?? prev.listed,
+                          image:
+                            n.image &&
+                            !n.image.includes('dicebear') &&
+                            !n.image.startsWith('data:image/svg')
+                              ? n.image
+                              : prev.image,
+                          name: n.name && !n.name.startsWith('#') ? n.name : prev.name,
+                          traits:
+                            Array.isArray(n.traits) &&
+                            n.traits.some(
+                              (t) =>
+                                t.trait_type !== 'Status' &&
+                                t.trait_type !== 'Token ID'
+                            )
+                              ? n.traits
+                              : prev.traits,
+                        })
+                      }
+                      // else: prev is good — keep it
                     }
-                  }
-                  nftsMapped = Array.from(byTok.values()).sort(
-                    (a, b) => (a.price ?? 0) - (b.price ?? 0)
-                  )
-                  setNfts(nftsMapped)
-                  cacheOpenSeaNfts(nftsMapped)
+                    const merged = Array.from(byTok.values()).sort(
+                      (a, b) => (a.price ?? 0) - (b.price ?? 0)
+                    )
+                    nftsMapped = merged
+                    cacheOpenSeaNfts(merged)
+                    return merged
+                  })
                   const still = nftsMapped.filter((n) =>
                     nftNeedsMetadata(n, fallbackImage)
                   ).length
