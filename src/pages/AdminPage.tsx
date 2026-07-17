@@ -2,7 +2,7 @@
  * OpenHood Admin — indexer analytics + problem detector.
  * Classifies Robinhood mainnet collections (verified ≥3 ETH OS volume vs high-risk / trash).
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -11,12 +11,18 @@ import {
   FlaskConical,
   Info,
   RefreshCw,
+  Server,
   ShieldAlert,
   Skull,
 } from 'lucide-react'
 import { useMarketplace } from '../context/MarketplaceContext'
 import { formatPrice, timeAgo } from '../data/mockData'
 import { VERIFIED_MIN_VOLUME_ETH } from '../lib/indexer'
+import {
+  fetchIndexerStatus,
+  hasIndexerUrl,
+  indexerUrl,
+} from '../lib/indexerApi'
 import { RiskBadge } from '../components/nft/RiskBadge'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -52,6 +58,28 @@ export function AdminPage() {
     'all' | IndexerProblemSeverity
   >('all')
   const [q, setQ] = useState('')
+  const [flyStatus, setFlyStatus] = useState<{
+    ok: boolean
+    collectionCount?: number
+    listedTotal?: number
+    lastFullSyncAt?: string | null
+    busy?: boolean
+    error?: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (!hasIndexerUrl()) return
+    let cancelled = false
+    ;(async () => {
+      const s = await fetchIndexerStatus()
+      if (cancelled) return
+      if (s) setFlyStatus({ ...s, ok: true })
+      else setFlyStatus({ ok: false, error: 'Unreachable' })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const t = indexerReport.totals
 
@@ -126,6 +154,43 @@ export function AdminPage() {
           Indexer error: {indexerError}
         </div>
       )}
+
+      {/* Fly server indexer */}
+      <div className="rounded-2xl border border-edge bg-surface-2/60 px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="w-10 h-10 rounded-xl bg-hood/15 border border-hood/25 flex items-center justify-center shrink-0">
+            <Server className="w-5 h-5 text-hood" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-ink">Fly market indexer</div>
+            <div className="text-xs text-ink-3 truncate">
+              {hasIndexerUrl() ? (
+                <>
+                  {indexerUrl()}
+                  {flyStatus?.ok
+                    ? ` · ${flyStatus.collectionCount ?? 0} collections · ${
+                        flyStatus.listedTotal?.toLocaleString() ?? 0
+                      } listed`
+                    : flyStatus?.error
+                      ? ` · ${flyStatus.error}`
+                      : ' · checking…'}
+                  {flyStatus?.lastFullSyncAt
+                    ? ` · synced ${timeAgo(flyStatus.lastFullSyncAt)}`
+                    : ''}
+                </>
+              ) : (
+                <>
+                  Not configured — set <code className="text-ink">VITE_INDEXER_URL</code> after{' '}
+                  <code className="text-ink">fly deploy</code> (see <code className="text-ink">server/README.md</code>)
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <Badge tone={hasIndexerUrl() && flyStatus?.ok ? 'green' : 'muted'}>
+          {hasIndexerUrl() ? (flyStatus?.ok ? 'online' : 'offline') : 'client-only'}
+        </Badge>
+      </div>
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">

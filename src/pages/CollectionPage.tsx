@@ -825,7 +825,7 @@ export function CollectionPage() {
                   <span className="ml-1 text-ink-3/80">· images</span>
                 )}
                 {isOpenSeaCol && openSeaNfts.fromCache && !openSeaNfts.refreshing && !openSeaNfts.loading && (
-                  <span className="ml-1 text-ink-3/80">· indexed</span>
+                  <span className="ml-1 text-ink-3/80">· local</span>
                 )}
               </div>
 

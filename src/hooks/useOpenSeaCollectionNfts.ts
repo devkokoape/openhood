@@ -28,6 +28,10 @@ import {
   pricesToEntries,
   putCollectionStore,
 } from '../lib/collectionStore'
+import {
+  fetchIndexerCollection,
+  hasIndexerUrl,
+} from '../lib/indexerApi'
 
 function applyPrices(nfts: Nft[], prices: Map<string, number>): Nft[] {
   return nfts.map((n) => {
@@ -189,14 +193,106 @@ export function useOpenSeaCollectionNfts(
       setRefreshing(true)
       listingsRef.current = []
       try {
-        // 2) Parallel: listings book + events + offers
+        // 2) Fly indexer first (shared server cache — fast for everyone)
+        if (hasIndexerUrl()) {
+          const remote = await fetchIndexerCollection(slugName)
+          if (cancelled || gen !== abortGen.current) return
+
+          if (remote?.nfts?.length) {
+            // Normalize ids to this app's collectionId (snapshot uses osN-slug)
+            const nftsMapped = remote.nfts.map((n) => ({
+              ...n,
+              collectionId: colId,
+              id: `${colId}-os-${n.tokenId}`,
+            }))
+            const acts = (remote.activities || []).map((a) => ({
+              ...a,
+              collectionId: colId,
+              nftId: a.nftId
+                ? `${colId}-os-${String(a.nftId).split('-os-').pop()}`
+                : undefined,
+            }))
+            const offs = (remote.offers || []).map((o) => ({
+              ...o,
+              collectionId: colId,
+              nftId: o.nftId
+                ? `${colId}-os-${String(o.nftId).split('-os-').pop()}`
+                : undefined,
+            }))
+            const prices = new Map(
+              (remote.prices || []).map(([k, v]) => [String(k), Number(v)])
+            )
+            // Also derive prices from listed nfts
+            for (const n of nftsMapped) {
+              if (n.listed && n.price != null) prices.set(String(n.tokenId), n.price)
+            }
+            pricesRef.current = prices
+            seenIds.current = new Set(nftsMapped.map((n) => n.id))
+            setNfts(nftsMapped)
+            setListedCount(remote.listedCount || nftsMapped.filter((n) => n.listed).length)
+            setTotalLoaded(nftsMapped.length)
+            setActivities(acts)
+            setOffers(offs)
+            activitiesRef.current = acts
+            offersRef.current = offs
+            setLoading(false)
+            setReady(true)
+            setFromCache(false)
+            cacheOpenSeaNfts(nftsMapped)
+            await persist({
+              slug: slugName,
+              collectionId: colId,
+              nfts: nftsMapped,
+              listedCount: remote.listedCount || nftsMapped.length,
+              activities: acts,
+              offers: offs,
+            })
+
+            // Soft success — skip heavy browser OpenSea crawl when server is warm
+            if (!cancelled && gen === abortGen.current) {
+              setLoading(false)
+              setRefreshing(false)
+              setReady(true)
+            }
+            return
+          }
+        }
+
+        // 3) Fallback: browser OpenSea crawl (listings + events + offers)
+        if (softOnly && hadCache) {
+          // Quiet background refresh of activity only
+          const [events, offerRows] = await Promise.all([
+            fetchCollectionEvents(slugName, 50).catch(() => []),
+            fetchCollectionOffers(slugName, 2).catch(() => []),
+          ])
+          if (cancelled || gen !== abortGen.current) return
+          const mappedActs = mapOpenSeaEventsToActivities(slugName, colId, events)
+          const mappedOffers = mapOpenSeaOffersToOffers(colId, offerRows)
+          if (mappedActs.length) {
+            setActivities(mappedActs)
+            activitiesRef.current = mappedActs
+          }
+          if (mappedOffers.length) {
+            setOffers(mappedOffers)
+            offersRef.current = mappedOffers
+          }
+          await persist({
+            slug: slugName,
+            collectionId: colId,
+            nfts: store!.nfts,
+            listedCount: store!.listedCount || store!.nfts.length,
+            activities: mappedActs,
+            offers: mappedOffers,
+          })
+          return
+        }
+
         const [listings, events, offerRows] = await Promise.all([
           fetchAllBestListings(slugName, {
             maxPages: 80,
             pageSize: 200,
             onPage: (batch, total) => {
               if (cancelled || gen !== abortGen.current) return
-              // Progressive paint only if we had nothing yet
               if (hadCache && softOnly) return
               const accPrices = new Map(pricesRef.current)
               for (const L of batch) {
@@ -215,7 +311,6 @@ export function useOpenSeaCollectionNfts(
               if (built.length === 0) return
               seenIds.current = new Set(built.map((n) => n.id))
               setNfts((prev) => {
-                // Prefer keeping enriched images from prev
                 const byId = new Map(prev.map((n) => [n.id, n]))
                 return built.map((n) => {
                   const old = byId.get(n.id)
@@ -249,7 +344,6 @@ export function useOpenSeaCollectionNfts(
 
         if (cancelled || gen !== abortGen.current) return
 
-        // Activities + offers always update (lightweight)
         const mappedActs = mapOpenSeaEventsToActivities(slugName, colId, events)
         const mappedOffers = mapOpenSeaOffersToOffers(colId, offerRows)
         if (mappedActs.length) {
@@ -261,12 +355,10 @@ export function useOpenSeaCollectionNfts(
           offersRef.current = mappedOffers
         }
 
-        // Listings: never wipe good data with empty
         if (listings.length === 0) {
           if (!hadCache) {
-            setError('Could not load listings from OpenSea. Retry in a moment.')
+            setError('Could not load listings. Is the indexer or OpenSea key configured?')
           }
-          // Keep existing nfts from cache
           await persist({
             slug: slugName,
             collectionId: colId,
@@ -285,7 +377,6 @@ export function useOpenSeaCollectionNfts(
             contract,
           })
 
-          // Merge enriched images from previous cache
           if (store?.nfts?.length) {
             const byId = new Map(store.nfts.map((n) => [n.id, n]))
             built = built.map((n) => {
@@ -329,7 +420,6 @@ export function useOpenSeaCollectionNfts(
             offers: mappedOffers,
           })
 
-          // Image enrichment (non-blocking for grid)
           const contractAddr =
             contract || listings.find((L) => L.contract)?.contract
           if (contractAddr && listings.length > 0) {

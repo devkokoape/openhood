@@ -1,0 +1,43 @@
+# OpenHood indexer on Fly.io
+# Deploy from repo root or server/:
+#   cd server
+#   fly launch --no-deploy   # first time
+#   fly secrets set OPENSEA_API_KEY=... SYNC_SECRET=...
+#   fly deploy
+
+app = "openhood-indexer"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "8080"
+  DATA_DIR = "/data"
+  SYNC_INTERVAL_MS = "45000"
+  SYNC_BATCH = "3"
+  ENRICH_LIMIT = "60"
+  CORS_ORIGIN = "*"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "openhood_data"
+  destination = "/data"

@@ -1,0 +1,14 @@
+{
+  "name": "openhood-indexer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "sync:once": "node src/index.js --once"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
