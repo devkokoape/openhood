@@ -245,8 +245,27 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/v1/collections') {
-      const rows = listCollections().map(summarize)
-      return json(res, 200, { collections: rows, count: rows.length }, 5)
+      // Cap payload size for mobile clients (default 100; max 300)
+      const limit = Math.min(
+        300,
+        Math.max(1, Number(url.searchParams.get('limit') || 100))
+      )
+      let rows = listCollections().map(summarize)
+      // Prefer markets with volume / listings first
+      rows = [...rows].sort(
+        (a, b) =>
+          (b.volume24h || 0) - (a.volume24h || 0) ||
+          (b.volumeTotal || 0) - (a.volumeTotal || 0) ||
+          (b.listedCount || 0) - (a.listedCount || 0)
+      )
+      const total = rows.length
+      rows = rows.slice(0, limit)
+      return json(
+        res,
+        200,
+        { collections: rows, count: rows.length, total },
+        5
+      )
     }
 
     // GET /v1/nfts/:id  — detail page resolve after refresh

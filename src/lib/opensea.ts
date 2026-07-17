@@ -713,9 +713,19 @@ export interface ParsedListing {
 
 /** In-memory cache so detail pages can resolve live OpenSea NFTs */
 const nftCache = new Map<string, Nft>()
+/** Hard cap — unbounded cache was a major mobile RAM leak */
+const NFT_CACHE_MAX = 1_500
 
 export function cacheOpenSeaNfts(list: Nft[]) {
-  for (const n of list) nftCache.set(n.id, n)
+  for (const n of list) {
+    if (nftCache.has(n.id)) nftCache.delete(n.id) // refresh insertion order
+    nftCache.set(n.id, n)
+  }
+  while (nftCache.size > NFT_CACHE_MAX) {
+    const first = nftCache.keys().next().value
+    if (first == null) break
+    nftCache.delete(first)
+  }
 }
 
 export function getCachedOpenSeaNft(id: string): Nft | undefined {

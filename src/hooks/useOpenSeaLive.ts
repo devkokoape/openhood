@@ -1,10 +1,11 @@
 /**
- * Live OpenSea Robinhood data — discovers ALL chain collections + polls stats.
+ * Live OpenSea Robinhood data — Fly-first, memory-capped.
  *
- * 1) Snapshot seed (instant)
- * 2) Full RH discovery (paginated OpenSea list)
- * 3) Fly indexer collections (shared server catalog)
- * 4) Stats refresh for floors/volume
+ * Heavy paths (full 1000+ collection discovery every few minutes) were
+ * OOMing phones. We now:
+ *  - Prefer Fly catalog (already filtered mainnet markets)
+ *  - Cap how many collections live in React state
+ *  - Poll stats slowly; skip OpenSea mass-discovery when Fly is available
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Activity, Collection } from '../types'
@@ -25,13 +26,18 @@ import {
   hasIndexerUrl,
 } from '../lib/indexerApi'
 import { withRisk } from '../lib/indexer'
+import {
+  eventsPollMs,
+  maxDiscoverCollections,
+  maxStatsBatch,
+  preferLiteMode,
+  statsPollMs,
+} from '../lib/device'
 
-/** How often to hit OpenSea for floors / volume (ms). */
-export const OPENSEA_STATS_INTERVAL_MS = 2000
-/** Events are heavier — poll less often when key present. */
-export const OPENSEA_EVENTS_INTERVAL_MS = 8000
-/** Re-discover full RH catalog */
-export const DISCOVER_INTERVAL_MS = 10 * 60_000
+/** Re-discover catalog (Fly-first) */
+export const DISCOVER_INTERVAL_MS = preferLiteMode()
+  ? 30 * 60_000
+  : 15 * 60_000
 
 export type OpenSeaLiveStatus = {
   live: boolean
@@ -88,10 +94,7 @@ function indexerRowToCollection(row: {
   })
 }
 
-function mergeBySlug(
-  base: Collection[],
-  extra: Collection[]
-): Collection[] {
+function mergeBySlug(base: Collection[], extra: Collection[]): Collection[] {
   const map = new Map<string, Collection>()
   for (const c of base) map.set(c.slug, c)
   for (const c of extra) {
@@ -100,8 +103,6 @@ function mergeBySlug(
       map.set(c.slug, c)
       continue
     }
-    // Prefer richer image / higher volume / more items
-    // Freeze id from first write so NFT ids / hooks don't remount mid-session
     map.set(c.slug, {
       ...prev,
       ...c,
@@ -113,7 +114,6 @@ function mergeBySlug(
           : prev.image,
       banner:
         c.banner && !c.banner.includes('dicebear') ? c.banner : prev.banner,
-      // Prefer non-zero fresher stats; allow floors/volumes to drop when both known
       floorPrice:
         c.floorPrice != null && c.floorPrice > 0
           ? c.floorPrice
@@ -133,6 +133,20 @@ function mergeBySlug(
     })
   }
   return Array.from(map.values())
+}
+
+/** Cap React state size — ranked by volume, verified first. */
+function capCollections(list: Collection[], max: number): Collection[] {
+  if (list.length <= max) return list
+  return [...list]
+    .sort((a, b) => {
+      const av = a.verified ? 1 : 0
+      const bv = b.verified ? 1 : 0
+      if (bv !== av) return bv - av
+      if (b.volume24h !== a.volume24h) return b.volume24h - a.volume24h
+      return b.volumeTotal - a.volumeTotal
+    })
+    .slice(0, max)
 }
 
 export function useOpenSeaLive() {
@@ -161,7 +175,7 @@ export function useOpenSeaLive() {
   const catalog = useMemo(() => {
     let list = mergeBySlug(seed, discovered)
     list = mergeBySlug(list, indexerCols)
-    return list
+    return capCollections(list, maxDiscoverCollections())
   }, [seed, discovered, indexerCols])
 
   const collections = useMemo(
@@ -169,41 +183,47 @@ export function useOpenSeaLive() {
     [catalog, patches]
   )
 
-  /** Discover every RH collection + pull Fly catalog */
   const runDiscovery = useCallback(async () => {
     if (discoverBusy.current) return
+    if (typeof document !== 'undefined' && document.hidden) return
     discoverBusy.current = true
     try {
-      const tasks: Promise<void>[] = []
+      const max = maxDiscoverCollections()
+      const lite = preferLiteMode()
 
-      // Fly indexer — all collections already pre-indexed for everyone
+      // 1) Fly first — shared catalog, no browser OpenSea storm
       if (hasIndexerUrl()) {
-        tasks.push(
-          fetchIndexerCollections().then((rows) => {
-            if (!rows?.length) return
-            setIndexerCols(rows.map(indexerRowToCollection))
-          })
-        )
+        const rows = await fetchIndexerCollections({ limit: max })
+        if (rows?.length) {
+          setIndexerCols(rows.map(indexerRowToCollection))
+          setStatus((s) => ({
+            ...s,
+            discovered: rows.length,
+            live: true,
+            lastOkAt: Date.now(),
+          }))
+        }
       }
 
-      // OpenSea full chain list (all collections, not just snapshot)
-      tasks.push(
-        fetchAllRobinhoodCollections({ maxPages: 40, pageSize: 100 }).then(
-          (rows) => {
-            if (!rows.length) return
-            const mapped = rows.map((c) => collectionFromOpenSeaListItem(c))
-            setDiscovered(mapped)
-            setStatus((s) => ({
-              ...s,
-              discovered: mapped.length,
-              live: true,
-              lastOkAt: Date.now(),
-            }))
-          }
-        )
-      )
-
-      await Promise.all(tasks)
+      // 2) OpenSea mass-list only when Fly missing AND not on a phone
+      if (!hasIndexerUrl() && !lite) {
+        const rows = await fetchAllRobinhoodCollections({
+          maxPages: 2,
+          pageSize: 50,
+        })
+        if (rows.length) {
+          const mapped = rows
+            .slice(0, max)
+            .map((c) => collectionFromOpenSeaListItem(c))
+          setDiscovered(mapped)
+          setStatus((s) => ({
+            ...s,
+            discovered: mapped.length,
+            live: true,
+            lastOkAt: Date.now(),
+          }))
+        }
+      }
     } catch (e) {
       setStatus((s) => ({
         ...s,
@@ -215,13 +235,13 @@ export function useOpenSeaLive() {
     }
   }, [])
 
-  // Stable refs so intervals don't restart every stats patch (OpenSea thrash)
   const collectionsRef = useRef(collections)
   collectionsRef.current = collections
   const seedSlugsLen = seedSlugs.length
 
   const refreshStats = useCallback(async () => {
     if (busy.current) return
+    if (typeof document !== 'undefined' && document.hidden) return
     const cols = collectionsRef.current
     if (!cols.length) return
     busy.current = true
@@ -230,18 +250,32 @@ export function useOpenSeaLive() {
       const ranked = [...cols]
         .filter((c) => c.source === 'opensea')
         .sort((a, b) => b.volume24h - a.volume24h)
-      const needFloor = ranked.filter((c) => !c.floorPrice).slice(0, 30)
-      const top = ranked.slice(0, 40)
+      const batch = maxStatsBatch()
+      const needFloor = ranked.filter((c) => !c.floorPrice).slice(0, batch)
+      const top = ranked.slice(0, batch)
       const batchSlugs = [
         ...new Set([...needFloor, ...top].map((c) => c.slug)),
-      ].slice(0, 50)
+      ].slice(0, batch)
 
-      const next = await refreshManyOpenSeaStats(batchSlugs, 4)
+      const next = await refreshManyOpenSeaStats(
+        batchSlugs,
+        preferLiteMode() ? 2 : 3
+      )
       if (next.size > 0) {
         setPatches((prev) => {
           const merged = new Map(prev)
+          // Cap patch map size
           for (const [slug, patch] of next) {
             merged.set(slug, { ...merged.get(slug), ...patch })
+          }
+          if (merged.size > 200) {
+            const keep = [...merged.keys()].slice(-150)
+            const trimmed = new Map<string, Partial<Collection>>()
+            for (const k of keep) {
+              const v = merged.get(k)
+              if (v) trimmed.set(k, v)
+            }
+            return trimmed
           }
           return merged
         })
@@ -277,16 +311,18 @@ export function useOpenSeaLive() {
 
   const refreshEvents = useCallback(async () => {
     if (!hasOpenSeaApiKey() || eventsBusy.current) return
+    if (typeof document !== 'undefined' && document.hidden) return
+    if (preferLiteMode()) return // skip heavy events on phones
     eventsBusy.current = true
     try {
       const ranked = [...collectionsRef.current]
         .filter((c) => c.source === 'opensea')
         .sort((a, b) => b.volume24h - a.volume24h)
-        .slice(0, 6)
+        .slice(0, 3)
 
       const batches = await Promise.all(
         ranked.map(async (c) => {
-          const events = await fetchCollectionEvents(c.slug, 12)
+          const events = await fetchCollectionEvents(c.slug, 8)
           return mapOpenSeaEventsToActivities(c.slug, c.id, events)
         })
       )
@@ -296,15 +332,15 @@ export function useOpenSeaLive() {
           (a, b) =>
             new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         )
+        .slice(0, 40)
       if (flat.length) setOsActivities(flat)
     } catch {
-      /* keep previous events */
+      /* keep previous */
     } finally {
       eventsBusy.current = false
     }
   }, [])
 
-  // Discover full RH catalog once + periodically
   useEffect(() => {
     void runDiscovery()
     const id = window.setInterval(
@@ -314,24 +350,16 @@ export function useOpenSeaLive() {
     return () => window.clearInterval(id)
   }, [runDiscovery])
 
-  // Stats loop — stable callback (no thrash on patch)
   useEffect(() => {
     void refreshStats()
-    const id = window.setInterval(
-      () => void refreshStats(),
-      OPENSEA_STATS_INTERVAL_MS
-    )
+    const id = window.setInterval(() => void refreshStats(), statsPollMs())
     return () => window.clearInterval(id)
   }, [refreshStats])
 
-  // Events loop
   useEffect(() => {
-    if (!hasOpenSeaApiKey()) return
+    if (!hasOpenSeaApiKey() || preferLiteMode()) return
     void refreshEvents()
-    const id = window.setInterval(
-      () => void refreshEvents(),
-      OPENSEA_EVENTS_INTERVAL_MS
-    )
+    const id = window.setInterval(() => void refreshEvents(), eventsPollMs())
     return () => window.clearInterval(id)
   }, [refreshEvents])
 

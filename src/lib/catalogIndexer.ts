@@ -22,12 +22,14 @@ import {
   type CatalogCacheEntry,
 } from './catalogCache'
 
-/** How many collections to warm on app load (top by volume). */
-const PREFETCH_TOP_N = 12
+import { catalogWarmCount, preferLiteMode } from './device'
+
+/** How many collections to warm on app load (top by volume). 0 on phones. */
+const PREFETCH_TOP_N = catalogWarmCount()
 /** Enrich first N listed images during background warm (rest on open). */
-const PREFETCH_ENRICH = 40
+const PREFETCH_ENRICH = preferLiteMode() ? 0 : 24
 /** Delay between collections to stay friendly to OpenSea rate limits. */
-const GAP_MS = 600
+const GAP_MS = preferLiteMode() ? 1200 : 800
 
 type IndexStatus = {
   running: boolean
@@ -194,6 +196,8 @@ export function startBackgroundCatalogIndex(
   collections: Collection[]
 ): Promise<void> {
   if (runner) return runner
+
+  if (PREFETCH_TOP_N <= 0) return Promise.resolve() // phones: no background warm
 
   const targets = [...collections]
     .filter((c) => c.source === 'opensea' && c.slug)

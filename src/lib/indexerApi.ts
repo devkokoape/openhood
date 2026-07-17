@@ -145,11 +145,12 @@ export async function fetchIndexerCollection(
   }
 }
 
-export async function fetchIndexerCollections(): Promise<
-  IndexerCollectionPayload[] | null
-> {
+export async function fetchIndexerCollections(opts?: {
+  limit?: number
+}): Promise<IndexerCollectionPayload[] | null> {
+  const limit = opts?.limit ?? 100
   const data = await getJson<{ collections?: IndexerCollectionPayload[] }>(
-    '/v1/collections'
+    `/v1/collections?limit=${limit}`
   )
   return data?.collections ?? null
 }

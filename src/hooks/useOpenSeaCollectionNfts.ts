@@ -35,6 +35,13 @@ import {
   fetchIndexerCollection,
   hasIndexerUrl,
 } from '../lib/indexerApi'
+import {
+  collectionNftsFirstPage,
+  collectionNftsHardCap,
+  enrichConcurrency,
+  enrichWaveSize,
+  preferLiteMode,
+} from '../lib/device'
 
 function applyPrices(nfts: Nft[], prices: Map<string, number>): Nft[] {
   return nfts.map((n) => {
@@ -222,9 +229,11 @@ export function useOpenSeaCollectionNfts(
         // 2) Fly indexer first (shared server cache — fast for everyone)
         if (hasIndexerUrl()) {
           // lite=1 → lean payload (~first 120 listed) for fast first paint
+          const firstLimit = collectionNftsFirstPage()
+          const hardCap = collectionNftsHardCap()
           const remote = await fetchIndexerCollection(slugName, {
             lite: true,
-            limit: 120,
+            limit: firstLimit,
           })
           if (cancelled || gen !== abortGen.current) return
 
@@ -238,7 +247,7 @@ export function useOpenSeaCollectionNfts(
                 traits: Array.isArray(n.traits) ? n.traits : [],
               }))
 
-            let nftsMapped = mapRemote(remote.nfts)
+            let nftsMapped = mapRemote(remote.nfts).slice(0, hardCap)
             const acts = (remote.activities || []).map((a) => ({
               ...a,
               collectionId: colId,
@@ -299,18 +308,19 @@ export function useOpenSeaCollectionNfts(
                     colId,
                     working,
                     {
-                      maxPages: 100,
+                      maxPages: preferLiteMode() ? 6 : 40,
                       collectionImage: fallbackImage,
                       signal,
                       onProgress: (partial) => {
                         if (cancelled || gen !== abortGen.current) return
-                        setNfts(partial)
-                        setTotalLoaded(partial.length)
+                        setNfts(partial.slice(0, hardCap))
+                        setTotalLoaded(Math.min(partial.length, hardCap))
                         cacheOpenSeaNfts(partial)
                       },
                     }
                   )
                   if (cancelled || gen !== abortGen.current) return
+                  working = working.slice(0, hardCap)
                   nftsMapped = working
                   setNfts(working)
                   cacheOpenSeaNfts(working)
@@ -333,7 +343,9 @@ export function useOpenSeaCollectionNfts(
                   contract ||
                   (remote as { contractAddress?: string }).contractAddress
                 if (stubs.length && contractAddr && !cancelled) {
-                  const wave1 = stubs.slice(0, 80)
+                  const waveN = enrichWaveSize()
+                  const conc = enrichConcurrency()
+                  const wave1 = stubs.slice(0, waveN)
                   const patches = await enrichNftsFromOpenSea(
                     wave1.map((n) => ({
                       tokenId: n.tokenId,
@@ -344,7 +356,7 @@ export function useOpenSeaCollectionNfts(
                     {
                       chain,
                       contract: contractAddr,
-                      concurrency: 8,
+                      concurrency: conc,
                       signal,
                       onProgress: (partial) => {
                         if (cancelled || gen !== abortGen.current) return
@@ -372,7 +384,9 @@ export function useOpenSeaCollectionNfts(
                       return next
                     })
                   }
-                  const more = stubs.slice(80, 250)
+                  const more = preferLiteMode()
+                    ? []
+                    : stubs.slice(waveN, waveN + 80)
                   if (more.length) {
                     const p2 = await enrichNftsFromOpenSea(
                       more.map((n) => ({
@@ -384,7 +398,7 @@ export function useOpenSeaCollectionNfts(
                       {
                         chain,
                         contract: contractAddr,
-                        concurrency: 6,
+                        concurrency: conc,
                         signal,
                       }
                     )
@@ -401,31 +415,40 @@ export function useOpenSeaCollectionNfts(
               })()
             }
 
-            // Background: pull next chunks from Fly
-            const nftsTotal =
+            // Background: pull next chunks from Fly (hard-capped — mobile RAM)
+            const nftsTotal = Math.min(
+              hardCap,
               (remote as { nftsTotal?: number }).nftsTotal ||
-              remote.listedCount ||
-              nftsMapped.length
-            if (nftsTotal > nftsMapped.length && !cancelled) {
+                remote.listedCount ||
+                nftsMapped.length
+            )
+            if (nftsTotal > nftsMapped.length && !cancelled && !preferLiteMode()) {
               void (async () => {
                 let offset = nftsMapped.length
-                while (offset < nftsTotal && !cancelled && gen === abortGen.current) {
+                while (
+                  offset < nftsTotal &&
+                  !cancelled &&
+                  gen === abortGen.current
+                ) {
                   const page = await fetchIndexerCollection(slugName, {
                     lite: true,
-                    limit: 120,
+                    limit: Math.min(100, nftsTotal - offset),
                     offset,
                   })
                   if (!page?.nfts?.length) break
                   const more = mapRemote(page.nfts)
                   for (const n of more) seenIds.current.add(n.id)
-                  nftsMapped = [...nftsMapped, ...more]
+                  nftsMapped = [...nftsMapped, ...more].slice(0, hardCap)
                   setNfts([...nftsMapped])
                   setTotalLoaded(nftsMapped.length)
-                  setHasMore(Boolean((page as { hasMore?: boolean }).hasMore))
+                  setHasMore(
+                    Boolean((page as { hasMore?: boolean }).hasMore) &&
+                      nftsMapped.length < hardCap
+                  )
                   cacheOpenSeaNfts(more)
                   offset += more.length
                   if (!(page as { hasMore?: boolean }).hasMore) break
-                  await new Promise((r) => setTimeout(r, 50))
+                  await new Promise((r) => setTimeout(r, 80))
                 }
                 if (!cancelled && gen === abortGen.current) {
                   void persist({
@@ -607,7 +630,7 @@ export function useOpenSeaCollectionNfts(
 
         const [listings, events, offerRows] = await Promise.all([
           fetchAllBestListings(slugName, {
-            maxPages: 80,
+            maxPages: preferLiteMode() ? 12 : 40,
             pageSize: 200,
             onPage: (batch, total) => {
               if (cancelled || gen !== abortGen.current) return
@@ -739,9 +762,10 @@ export function useOpenSeaCollectionNfts(
           })
 
           // Bulk fill art/names via collection NFT catalog pages (50/request)
+          // Cap pages hard on mobile to avoid multi-MB state
           setEnriching(true)
           built = await fillListedNftMetadata(slugName, colId, built, {
-            maxPages: 150,
+            maxPages: preferLiteMode() ? 8 : 40,
             collectionImage: fallbackImage,
             signal,
             onProgress: (partial) => {
@@ -771,11 +795,13 @@ export function useOpenSeaCollectionNfts(
           const contractAddr =
             contract || listings.find((L) => L.contract)?.contract
           if (stillMissing.length > 0 && contractAddr) {
-            const items = stillMissing.slice(0, 200).map((n) => ({
-              tokenId: n.tokenId,
-              chain: chain,
-              contract: contractAddr,
-            }))
+            const items = stillMissing
+              .slice(0, enrichWaveSize() * 2)
+              .map((n) => ({
+                tokenId: n.tokenId,
+                chain: chain,
+                contract: contractAddr,
+              }))
             const applyPatches = (patches: Map<string, Partial<Nft>>) => {
               if (cancelled || gen !== abortGen.current) return
               setNfts((prev) => {
@@ -793,7 +819,7 @@ export function useOpenSeaCollectionNfts(
             await enrichNftsFromOpenSea(items, colId, {
               chain,
               contract: contractAddr,
-              concurrency: 8,
+              concurrency: enrichConcurrency(),
               signal,
               onProgress: applyPatches,
             })

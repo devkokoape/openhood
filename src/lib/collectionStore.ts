@@ -10,6 +10,7 @@
  */
 import type { Activity, Nft, Offer } from '../types'
 import { cacheOpenSeaNfts } from './opensea'
+import { memCollectionCap, preferLiteMode } from './device'
 
 // v7: bust stale caches that stored green dicebear stubs / empty traits
 const DB_NAME = 'openhood-collection-v7'
@@ -17,9 +18,9 @@ const STORE = 'collections'
 const DB_VERSION = 1
 const LS_PREFIX = 'oh-col-v7:'
 /** Keep localStorage lean so refresh is instant even for large books. */
-const LITE_NFT_CAP = 240
-const LITE_ACTIVITY_CAP = 80
-const LITE_OFFER_CAP = 40
+const LITE_NFT_CAP = preferLiteMode() ? 80 : 160
+const LITE_ACTIVITY_CAP = preferLiteMode() ? 30 : 60
+const LITE_OFFER_CAP = preferLiteMode() ? 16 : 40
 
 export interface CollectionStoreEntry {
   slug: string
@@ -34,6 +35,18 @@ export interface CollectionStoreEntry {
 }
 
 const mem = new Map<string, CollectionStoreEntry>()
+
+/** Drop oldest in-memory catalogs so phones don't keep every opened book. */
+function touchMem(slug: string, entry: CollectionStoreEntry) {
+  if (mem.has(slug)) mem.delete(slug)
+  mem.set(slug, entry)
+  const max = memCollectionCap()
+  while (mem.size > max) {
+    const first = mem.keys().next().value
+    if (first == null) break
+    mem.delete(first)
+  }
+}
 
 function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
@@ -110,7 +123,7 @@ export function getCollectionStoreSync(slug: string): CollectionStoreEntry | nul
   if (m?.nfts?.length) return m
   const ls = readLocalStorage(slug)
   if (ls?.nfts?.length) {
-    mem.set(slug, ls)
+    touchMem(slug, ls)
     cacheOpenSeaNfts(ls.nfts)
     return ls
   }
@@ -141,7 +154,7 @@ export async function getCollectionStore(
           row.offers = row.offers || []
           // Prefer the larger of IDB vs lite
           if (!sync || row.nfts.length >= sync.nfts.length) {
-            mem.set(slug, row)
+            touchMem(slug, row)
             cacheOpenSeaNfts(row.nfts)
             resolve(row)
             return
@@ -175,7 +188,7 @@ export async function putCollectionStore(
       offers: entry.offers?.length ? entry.offers : prev.offers,
       updatedAt: Date.now(),
     }
-    mem.set(entry.slug, merged)
+    touchMem(entry.slug, merged)
     writeLocalStorage(merged)
     return
   }
@@ -203,7 +216,13 @@ export async function putCollectionStore(
     normalized.nfts = mergeNftsPreferEnriched(prev.nfts, normalized.nfts)
   }
 
-  mem.set(entry.slug, normalized)
+  // Cap in-memory NFT arrays (IDB can still store more if needed later)
+  const cap = preferLiteMode() ? 120 : 300
+  if (normalized.nfts.length > cap) {
+    normalized.nfts = normalized.nfts.slice(0, cap)
+  }
+
+  touchMem(entry.slug, normalized)
   if (normalized.nfts.length) cacheOpenSeaNfts(normalized.nfts)
   writeLocalStorage(normalized)
 
