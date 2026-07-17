@@ -9,7 +9,9 @@ import { hasIndexerUrl, indexerUrl } from './indexerApi'
 function isRealRemote(url?: string | null): boolean {
   if (!url || !/^https?:\/\//i.test(url)) return false
   if (url.includes('dicebear')) return false
-  if (/image_type_(logo|hero|featured)/i.test(url)) return false
+  if (url.includes('seed=openhood')) return false
+  if (url.startsWith('data:image/svg')) return false
+  // Collection logos are OK for collectionMediaUrl; nft path filters separately
   return true
 }
 

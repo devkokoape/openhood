@@ -334,13 +334,24 @@ const server = http.createServer(async (req, res) => {
       let row = getCollection(slug)
       if (row?.nfts?.length) {
         // Keep improving in background if stubs remain
-        const stubs = (row.nfts || []).filter(
-          (n) =>
-            !n.image ||
-            String(n.image).includes('dicebear') ||
-            /image_type_(logo|hero)/i.test(n.image)
-        ).length
-        if (stubs > 10) enqueueSync(slug, { full: true })
+        const stubs = (row.nfts || []).filter((n) => {
+          const img = String(n.image || '')
+          const traits = Array.isArray(n.traits) ? n.traits : []
+          const realTraits = traits.filter(
+            (t) =>
+              t?.trait_type &&
+              t.trait_type !== 'Status' &&
+              t.trait_type !== 'Token ID'
+          )
+          return (
+            !img ||
+            img.includes('dicebear') ||
+            img.startsWith('data:image/svg') ||
+            /image_type_(logo|hero)/i.test(img) ||
+            realTraits.length === 0
+          )
+        }).length
+        if (stubs > 5) enqueueSync(slug, { full: true })
       } else {
         // Not indexed yet: try quick meta sync with hard timeout, else 202
         try {
@@ -391,9 +402,11 @@ const server = http.createServer(async (req, res) => {
       const offset = Math.max(0, Number(url.searchParams.get('offset') || 0))
       const allNfts = row.nfts || []
       const slice = allNfts.slice(offset, offset + limit)
-      // Lean cards: drop heavy traits on first paint
-      const leanNfts = lite
-        ? slice.map((n) => ({
+      // Lean cards: keep traits for filters (cap size); always array
+      const leanNfts = slice.map((n) => {
+        const traits = Array.isArray(n.traits) ? n.traits.slice(0, 16) : []
+        if (lite) {
+          return {
             id: n.id,
             tokenId: n.tokenId,
             name: n.name,
@@ -403,8 +416,11 @@ const server = http.createServer(async (req, res) => {
             listed: n.listed,
             price: n.price,
             rarityRank: n.rarityRank,
-          }))
-        : slice
+            traits,
+          }
+        }
+        return { ...n, traits }
+      })
 
       return json(
         res,

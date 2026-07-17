@@ -182,8 +182,17 @@ function parseJson(s, fallback) {
   }
 }
 
-function isEnriched(image, name) {
-  if (!image || String(image).includes('dicebear')) return 0
+function isEnriched(image, name, _traits) {
+  // Art + name is enough. Traits are best-effort (many collections are pre-reveal).
+  if (!image) return 0
+  const img = String(image)
+  if (
+    img.includes('dicebear') ||
+    img.startsWith('data:image/svg') ||
+    img.includes('seed=openhood')
+  )
+    return 0
+  if (/image_type_(logo|hero|featured)/i.test(img)) return 0
   if (!name || String(name).startsWith('#')) return 0
   return 1
 }
@@ -370,7 +379,8 @@ export function dbReplaceNfts(slug, nfts, collectionId) {
         const oldTraits = parseJson(old.traits_json, [])
         if ((traits?.length || 0) <= 2 && oldTraits.length > 2) traits = oldTraits
       }
-      const enriched = isEnriched(image, name)
+      const traitsJson = JSON.stringify(traits || [])
+      const enriched = isEnriched(image, name, traits)
       const id = n.id || `${collectionId || `os-${slug}`}-os-${tokenId}`
       const row = {
         id,
@@ -383,7 +393,7 @@ export function dbReplaceNfts(slug, nfts, collectionId) {
         listed: n.listed === false ? 0 : 1,
         price: n.price ?? null,
         rarity_rank: n.rarityRank ?? null,
-        traits_json: JSON.stringify(traits || []),
+        traits_json: traitsJson,
         enriched,
         updated_at: now,
       }
@@ -430,6 +440,9 @@ export function dbPatchNfts(slug, patchesByToken) {
       if (!cur) continue
       const name = p.name || cur.name
       const image = p.image || cur.image
+      const traitsArr = p.traits?.length
+        ? p.traits
+        : parseJson(cur.traits_json, [])
       const traits = p.traits?.length ? JSON.stringify(p.traits) : null
       const rarity = p.rarityRank ?? null
       upd.run(
@@ -438,7 +451,7 @@ export function dbPatchNfts(slug, patchesByToken) {
         p.owner || null,
         traits,
         rarity,
-        isEnriched(image, name),
+        isEnriched(image, name, traitsArr),
         now,
         slug,
         String(tokenId)
@@ -515,10 +528,20 @@ export function dbGetNftBySlugToken(slug, tokenId) {
 }
 
 export function dbUnenriched(slug, limit = 40) {
+  // Priority: missing real art (dicebear / gray stubs / empty)
   return getDb()
     .prepare(
       `SELECT token_id, slug FROM nfts
-       WHERE slug = ? AND enriched = 0
+       WHERE slug = ?
+         AND (
+           enriched = 0
+           OR image IS NULL OR image = ''
+           OR image LIKE '%dicebear%'
+           OR image LIKE 'data:image/svg%'
+           OR image LIKE '%seed=openhood%'
+           OR image LIKE '%image_type_logo%'
+           OR image LIKE '%image_type_hero%'
+         )
        LIMIT ?`
     )
     .all(slug, limit)

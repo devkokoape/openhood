@@ -16,22 +16,34 @@ export function CollectionCard({ collection }: { collection: Collection }) {
       <div className="relative h-28 bg-surface-2 overflow-hidden">
         <img
           src={
-            collection.banner && !/\.(mp4|webm)(\?|$)/i.test(collection.banner)
+            collection.banner &&
+            !/\.(mp4|webm)(\?|$)/i.test(collection.banner) &&
+            !collection.banner.includes('dicebear')
               ? collection.banner
-              : collectionMediaUrl(collection.slug, collection.image) ||
-                collection.image
+              : collection.image && !collection.image.includes('dicebear')
+                ? collection.image
+                : collectionMediaUrl(collection.slug, collection.image) ||
+                  collection.image
           }
           alt=""
           referrerPolicy="no-referrer"
           className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-300"
+          onError={(e) => {
+            const el = e.currentTarget
+            if (collection.image && el.src !== collection.image) {
+              el.src = collection.image
+            }
+          }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent" />
       </div>
       <div className="px-4 pb-4 -mt-8 relative">
         <img
           src={
-            collectionMediaUrl(collection.slug, collection.image) ||
-            collection.image
+            collection.image && !collection.image.includes('dicebear')
+              ? collection.image
+              : collectionMediaUrl(collection.slug, collection.image) ||
+                collection.image
           }
           alt={collection.name}
           referrerPolicy="no-referrer"

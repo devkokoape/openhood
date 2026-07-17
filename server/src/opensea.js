@@ -233,19 +233,22 @@ export function listingsToNfts(listings, collectionId, { name = '' } = {}) {
   const out = []
   for (const L of byToken.values()) {
     const tid = Number(L.tokenId)
-    // Always stub with dicebear — never collection logo (that blocks enrich detection)
+    // Neutral stub (gray) — NOT green OpenHood branding (users confused it with testnet)
+    const stubSvg = encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect fill="#1a1d21" width="400" height="400"/><text x="200" y="200" text-anchor="middle" fill="#6b7280" font-family="sans-serif" font-size="28">#${L.tokenId}</text></svg>`
+    )
     out.push({
       id: `${collectionId}-os-${L.tokenId}`,
       tokenId: Number.isSafeInteger(tid) ? tid : parseInt(L.tokenId, 10) || 0,
       name: name ? `${name} #${L.tokenId}` : `#${L.tokenId}`,
       collectionId,
-      image: `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${L.tokenId}&backgroundColor=0b0e11,00c805`,
+      image: `data:image/svg+xml,${stubSvg}`,
       owner: L.seller || 'unknown',
       listed: true,
       price: L.priceEth,
       traits: [
         { trait_type: 'Status', value: 'Listed' },
-        { trait_type: 'Token ID', value: L.tokenId },
+        { trait_type: 'Token ID', value: String(L.tokenId) },
       ],
     })
   }
@@ -255,10 +258,25 @@ export function listingsToNfts(listings, collectionId, { name = '' } = {}) {
 
 function isPlaceholderImage(image) {
   if (!image) return true
-  if (String(image).includes('dicebear')) return true
-  if (/image_type_(logo|hero|featured)/i.test(image)) return true
-  if (/\/collection\/[^/]+\/image_type_/i.test(image)) return true
+  const s = String(image)
+  if (s.includes('dicebear')) return true
+  if (s.startsWith('data:image/svg')) return true
+  if (s.includes('seed=openhood')) return true
+  if (/image_type_(logo|hero|featured)/i.test(s)) return true
+  if (/\/collection\/[^/]+\/image_type_/i.test(s)) return true
   return false
+}
+
+/** Stub traits from listings-only path — not real NFT attributes for filters */
+function hasRealTraits(traits) {
+  if (!Array.isArray(traits) || traits.length === 0) return false
+  const real = traits.filter(
+    (t) =>
+      t?.trait_type &&
+      t.trait_type !== 'Status' &&
+      t.trait_type !== 'Token ID'
+  )
+  return real.length > 0
 }
 
 /**
@@ -269,7 +287,13 @@ export async function fillListedFromCatalog(slug, nfts, collectionId, { maxPages
   const byToken = new Map(nfts.map((n) => [String(n.tokenId), { ...n }]))
   const needed = new Set(
     nfts
-      .filter((n) => isPlaceholderImage(n.image) || !n.name || String(n.name).startsWith('#'))
+      .filter(
+        (n) =>
+          isPlaceholderImage(n.image) ||
+          !n.name ||
+          String(n.name).startsWith('#') ||
+          !hasRealTraits(n.traits)
+      )
       .map((n) => String(n.tokenId))
   )
   if (!needed.size) return nfts
@@ -295,10 +319,27 @@ export async function fillListedFromCatalog(slug, nfts, collectionId, { maxPages
         name: raw.name || existing.name,
         image,
         owner: raw.owners?.[0]?.address?.toLowerCase() || existing.owner,
-        traits: traits.length > 2 ? traits : existing.traits,
+        traits: hasRealTraits(traits)
+          ? traits
+          : hasRealTraits(existing.traits)
+            ? existing.traits
+            : traits.length
+              ? traits
+              : existing.traits,
         rarityRank: raw.rarity?.rank ?? existing.rarityRank,
       })
-      needed.delete(tid)
+      // Only drop from needed once we have real art AND real traits
+      const nextRow = byToken.get(tid)
+      if (
+        nextRow &&
+        !isPlaceholderImage(nextRow.image) &&
+        hasRealTraits(nextRow.traits)
+      ) {
+        needed.delete(tid)
+      } else if (nextRow && !isPlaceholderImage(nextRow.image)) {
+        // art ok — still want traits but don't block forever on catalog miss
+        needed.delete(tid)
+      }
     }
     next = data?.next
     if (!next) break
@@ -340,9 +381,10 @@ export async function enrichImages(
       nfts
         .filter(
           (n) =>
-            !n.image ||
-            String(n.image).includes('dicebear') ||
-            /image_type_(logo|hero)/i.test(n.image)
+            isPlaceholderImage(n.image) ||
+            !n.name ||
+            String(n.name).startsWith('#') ||
+            !hasRealTraits(n.traits)
         )
         .map((n) => String(n.tokenId))
     )
@@ -395,10 +437,18 @@ export async function enrichImages(
       name: p.name || n.name,
       image: p.image || n.image,
       owner: p.owner || n.owner,
-      traits: p.traits?.length ? p.traits : n.traits,
+      traits: hasRealTraits(p.traits)
+        ? p.traits
+        : hasRealTraits(n.traits)
+          ? n.traits
+          : p.traits?.length
+            ? p.traits
+            : n.traits,
     }
   })
 }
+
+export { isPlaceholderImage, hasRealTraits }
 
 function short(addr) {
   if (!addr || addr.length < 12) return addr || 'unknown'

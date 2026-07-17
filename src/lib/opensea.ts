@@ -781,11 +781,27 @@ export function isPlaceholderNftImage(
 ): boolean {
   if (!image) return true
   if (image.includes('dicebear')) return true
+  if (image.startsWith('data:image/svg')) return true // our gray stubs
   if (collectionImage && image === collectionImage) return true
   // Collection-level OpenSea assets, not per-token art
   if (/image_type_(logo|hero|featured)/i.test(image)) return true
   if (/\/collection\/[^/]+\/image_type_/i.test(image)) return true
+  // Testnet demo art
+  if (image.includes('seed=openhood')) return true
   return false
+}
+
+/** Listings stub traits are not filterable attributes */
+export function hasRealNftTraits(
+  traits?: { trait_type: string; value: string }[] | null
+): boolean {
+  if (!Array.isArray(traits) || traits.length === 0) return false
+  return traits.some(
+    (t) =>
+      t?.trait_type &&
+      t.trait_type !== 'Status' &&
+      t.trait_type !== 'Token ID'
+  )
 }
 
 export function nftNeedsMetadata(
@@ -794,9 +810,14 @@ export function nftNeedsMetadata(
 ): boolean {
   if (isPlaceholderNftImage(n.image, collectionImage)) return true
   if (!n.name || n.name.startsWith('#')) return true
-  // Generic "CollectionName #id" without real OS name is OK to refine later;
-  // only force if still placeholder image.
+  // Prefer re-fetch when traits are missing (filters). Pre-reveal may stay empty.
+  if (!hasRealNftTraits(n.traits)) return true
   return false
+}
+
+/** After art is good, still want traits for filters (capped retries in hooks). */
+export function nftNeedsTraits(n: Nft): boolean {
+  return !hasRealNftTraits(n.traits)
 }
 
 /** Build listed NFT cards from best-listings (marketplace inventory). */
@@ -816,8 +837,10 @@ export function nftsFromListings(
     const tokenIdNum = Number(L.tokenId)
     const id = openSeaNftId(collectionId, L.tokenId)
     const cached = nftCache.get(id)
-    // Never use collection logo as token art — it blocks enrich detection
-    const stub = `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${L.tokenId}&backgroundColor=0b0e11,00c805`
+    // Neutral gray stub — not green dicebear (looked like OpenHood testnet badge)
+    const stub = `data:image/svg+xml,${encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect fill="#1a1d21" width="400" height="400"/><text x="200" y="205" text-anchor="middle" fill="#6b7280" font-family="system-ui,sans-serif" font-size="32">#${L.tokenId}</text></svg>`
+    )}`
     const cachedOk =
       cached?.image && !isPlaceholderNftImage(cached.image, opts?.fallbackImage)
 
@@ -833,8 +856,8 @@ export function nftsFromListings(
       listed: true,
       price: L.priceEth,
       rarityRank: cached?.rarityRank,
-      traits: cached?.traits?.length
-        ? cached.traits
+      traits: Array.isArray(cached?.traits) && cached!.traits.length
+        ? cached!.traits
         : [
             { trait_type: 'Status', value: 'Listed' },
             { trait_type: 'Token ID', value: L.tokenId },

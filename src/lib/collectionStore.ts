@@ -11,10 +11,11 @@
 import type { Activity, Nft, Offer } from '../types'
 import { cacheOpenSeaNfts } from './opensea'
 
-const DB_NAME = 'openhood-collection-v5'
+// v7: bust stale caches that stored green dicebear stubs / empty traits
+const DB_NAME = 'openhood-collection-v7'
 const STORE = 'collections'
 const DB_VERSION = 1
-const LS_PREFIX = 'oh-col-v5:'
+const LS_PREFIX = 'oh-col-v7:'
 /** Keep localStorage lean so refresh is instant even for large books. */
 const LITE_NFT_CAP = 240
 const LITE_ACTIVITY_CAP = 80

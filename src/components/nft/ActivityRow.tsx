@@ -30,8 +30,10 @@ const typeMeta: Record<
 function fallbackNftImage(nftId?: string): string | undefined {
   if (!nftId) return undefined
   const tid = parseOnChainTokenId(nftId)
-  if (tid == null) return undefined
-  return `https://api.dicebear.com/7.x/shapes/svg?seed=oh-${tid}&backgroundColor=00c805,0b0e11`
+  const label = tid != null ? `#${tid}` : 'NFT'
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect fill="#1a1d21" width="64" height="64"/><text x="32" y="36" text-anchor="middle" fill="#6b7280" font-size="12" font-family="system-ui">${label}</text></svg>`
+  )}`
 }
 
 export function ActivityRow({ activity }: { activity: Activity }) {

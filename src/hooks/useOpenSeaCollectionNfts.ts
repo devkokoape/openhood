@@ -46,6 +46,18 @@ function applyPrices(nfts: Nft[], prices: Map<string, number>): Nft[] {
   })
 }
 
+function hasUsefulTraits(
+  traits?: { trait_type: string; value: string }[] | null
+): boolean {
+  if (!Array.isArray(traits) || !traits.length) return false
+  return traits.some(
+    (t) =>
+      t?.trait_type &&
+      t.trait_type !== 'Status' &&
+      t.trait_type !== 'Token ID'
+  )
+}
+
 function mergeEnrichment(
   list: Nft[],
   patches: Map<string, Partial<Nft>>
@@ -54,14 +66,25 @@ function mergeEnrichment(
   return list.map((n) => {
     const p = patches.get(String(n.tokenId))
     if (!p) return n
+    const nextImg =
+      p.image &&
+      !p.image.includes('dicebear') &&
+      !p.image.startsWith('data:image/svg')
+        ? p.image
+        : n.image
     return {
       ...n,
       name: p.name || n.name,
-      image:
-        p.image && !p.image.includes('dicebear') ? p.image : n.image,
+      image: nextImg,
       owner: p.owner || n.owner,
       rarityRank: p.rarityRank ?? n.rarityRank,
-      traits: p.traits?.length ? p.traits : n.traits,
+      traits: hasUsefulTraits(p.traits)
+        ? p.traits!
+        : hasUsefulTraits(n.traits)
+          ? n.traits
+          : p.traits?.length
+            ? p.traits
+            : n.traits,
     }
   })
 }
@@ -252,9 +275,10 @@ export function useOpenSeaCollectionNfts(
             setReady(true)
             setFromCache(false)
             setRefreshing(false)
-            setEnriching(
-              nftsMapped.some((n) => nftNeedsMetadata(n, fallbackImage))
-            )
+            const stubCount = nftsMapped.filter((n) =>
+              nftNeedsMetadata(n, fallbackImage)
+            ).length
+            setEnriching(stubCount > 0)
             cacheOpenSeaNfts(nftsMapped)
             void persist({
               slug: slugName,
@@ -265,7 +289,120 @@ export function useOpenSeaCollectionNfts(
               offers: offs,
             })
 
-            // Background: pull next chunks from Fly (still no OpenSea browser crawl)
+            // If Fly still has stubs / empty traits, fill from OpenSea in background
+            // Catalog pages (50/req) first — much faster than only per-token
+            if (stubCount > 0 && !cancelled) {
+              void (async () => {
+                let working = nftsMapped
+                try {
+                  working = await fillListedNftMetadata(
+                    slugName,
+                    colId,
+                    working,
+                    {
+                      maxPages: 100,
+                      collectionImage: fallbackImage,
+                      signal,
+                      onProgress: (partial) => {
+                        if (cancelled || gen !== abortGen.current) return
+                        setNfts(partial)
+                        setTotalLoaded(partial.length)
+                        cacheOpenSeaNfts(partial)
+                      },
+                    }
+                  )
+                  if (cancelled || gen !== abortGen.current) return
+                  nftsMapped = working
+                  setNfts(working)
+                  cacheOpenSeaNfts(working)
+                  void persist({
+                    slug: slugName,
+                    collectionId: colId,
+                    nfts: working,
+                    listedCount: remote.listedCount || working.length,
+                    activities: acts,
+                    offers: offs,
+                  })
+                } catch {
+                  /* fall through to per-token */
+                }
+
+                const stubs = working.filter((n) =>
+                  nftNeedsMetadata(n, fallbackImage)
+                )
+                const contractAddr =
+                  contract ||
+                  (remote as { contractAddress?: string }).contractAddress
+                if (stubs.length && contractAddr && !cancelled) {
+                  const wave1 = stubs.slice(0, 80)
+                  const patches = await enrichNftsFromOpenSea(
+                    wave1.map((n) => ({
+                      tokenId: n.tokenId,
+                      chain,
+                      contract: contractAddr,
+                    })),
+                    colId,
+                    {
+                      chain,
+                      contract: contractAddr,
+                      concurrency: 8,
+                      signal,
+                      onProgress: (partial) => {
+                        if (cancelled || gen !== abortGen.current) return
+                        setNfts((prev) => {
+                          const next = mergeEnrichment(prev, partial)
+                          cacheOpenSeaNfts(next)
+                          return next
+                        })
+                      },
+                    }
+                  )
+                  if (cancelled || gen !== abortGen.current) return
+                  if (patches.size) {
+                    setNfts((prev) => {
+                      const next = mergeEnrichment(prev, patches)
+                      cacheOpenSeaNfts(next)
+                      void persist({
+                        slug: slugName,
+                        collectionId: colId,
+                        nfts: next,
+                        listedCount: remote.listedCount || next.length,
+                        activities: acts,
+                        offers: offs,
+                      })
+                      return next
+                    })
+                  }
+                  const more = stubs.slice(80, 250)
+                  if (more.length) {
+                    const p2 = await enrichNftsFromOpenSea(
+                      more.map((n) => ({
+                        tokenId: n.tokenId,
+                        chain,
+                        contract: contractAddr,
+                      })),
+                      colId,
+                      {
+                        chain,
+                        contract: contractAddr,
+                        concurrency: 6,
+                        signal,
+                      }
+                    )
+                    if (!cancelled && gen === abortGen.current && p2.size) {
+                      setNfts((prev) => {
+                        const next = mergeEnrichment(prev, p2)
+                        cacheOpenSeaNfts(next)
+                        return next
+                      })
+                    }
+                  }
+                }
+                if (!cancelled && gen === abortGen.current) setEnriching(false)
+              })()
+            }
+
+            // Background: pull next chunks from Fly
             const nftsTotal =
               (remote as { nftsTotal?: number }).nftsTotal ||
               remote.listedCount ||

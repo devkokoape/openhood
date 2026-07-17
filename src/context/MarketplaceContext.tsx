@@ -174,13 +174,15 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   } = useMainnetIndexer(baseCollections)
 
   const collections = useMemo(() => {
-    // Real OpenSea market first by volume; testnet demo is available but not forced on top
-    const riskOrder = { verified: 0, high_risk: 1, trash: 2, demo: 3 } as const
+    // OpenSea market only on Discover-facing lists: demote demo/testnet to the end
     return [...indexedCollections].sort((a, b) => {
-      const ra = riskOrder[a.risk || (a.source === 'demo' ? 'demo' : 'trash')] ?? 3
-      const rb = riskOrder[b.risk || (b.source === 'demo' ? 'demo' : 'trash')] ?? 3
+      const aDemo = a.source === 'demo' || a.id === ONCHAIN_COLLECTION_ID ? 1 : 0
+      const bDemo = b.source === 'demo' || b.id === ONCHAIN_COLLECTION_ID ? 1 : 0
+      if (aDemo !== bDemo) return aDemo - bDemo
+      const riskOrder = { verified: 0, high_risk: 1, trash: 2, demo: 3 } as const
+      const ra = riskOrder[a.risk || 'trash'] ?? 3
+      const rb = riskOrder[b.risk || 'trash'] ?? 3
       if (ra !== rb) return ra - rb
-      // Prefer higher 24h volume for real market surfaces
       if (b.volume24h !== a.volume24h) return b.volume24h - a.volume24h
       return b.volumeTotal - a.volumeTotal
     })

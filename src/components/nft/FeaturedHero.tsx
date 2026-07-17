@@ -9,9 +9,15 @@ import { collectionMediaUrl } from '../../lib/mediaUrl'
 import clsx from 'clsx'
 
 export function FeaturedHero({ collections }: { collections: Collection[] }) {
-  // Prefer real OpenSea collections for hero (skip empty-image demo/testnet)
-  const openSea = collections.filter((c) => c.source === 'opensea' && c.image)
-  const slides = openSea.length > 0 ? openSea.slice(0, 5) : collections.slice(0, 5)
+  // Hero = real OpenSea only (never OpenHood testnet dicebear green)
+  const openSea = collections.filter(
+    (c) =>
+      c.source === 'opensea' &&
+      c.image &&
+      !c.image.includes('dicebear') &&
+      !c.image.includes('seed=openhood')
+  )
+  const slides = openSea.length > 0 ? openSea.slice(0, 5) : []
   const [index, setIndex] = useState(0)
   const [paused, setPaused] = useState(false)
 

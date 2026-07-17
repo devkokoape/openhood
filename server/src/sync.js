@@ -12,6 +12,9 @@ import {
   fetchCollectionEvents,
   fetchCollectionOffers,
   fetchCollectionStats,
+  fillListedFromCatalog,
+  hasRealTraits,
+  isPlaceholderImage,
   listingsToNfts,
   mapEvents,
   mapOffers,
@@ -319,28 +322,45 @@ export async function syncSlugItems(slug) {
 
   const need = row.nfts.filter(
     (n) =>
-      !n.image ||
-      String(n.image).includes('dicebear') ||
-      /image_type_(logo|hero)/i.test(n.image)
+      isPlaceholderImage(n.image) ||
+      !n.name ||
+      String(n.name).startsWith('#') ||
+      !hasRealTraits(n.traits)
   )
   if (!need.length) {
     console.log(`[sync:items] ${slug}: already complete (${row.nfts.length})`)
     return row
   }
 
-  console.log(`[sync:items] ${slug}: enriching ${need.length}/${row.nfts.length}`)
-  const listings = need.map((n) => ({
-    tokenId: String(n.tokenId),
-    contract,
-    chain,
-  }))
-  // Process ALL needed tokens (concurrency limited)
-  let nfts = await enrichImages(row.nfts, listings, {
-    chain,
-    concurrency: Number(process.env.ENRICH_CONCURRENCY || 6),
-    limit: need.length,
-    onlyMissing: true,
-  })
+  console.log(
+    `[sync:items] ${slug}: enriching ${need.length}/${row.nfts.length} (art+traits)`
+  )
+
+  // 1) Bulk catalog pages (50/req) — fastest when supply is dense
+  let nfts = await fillListedFromCatalog(
+    slug,
+    row.nfts,
+    row.collectionId || `os-${slug}`,
+    { maxPages: 80 }
+  )
+
+  // 2) Per-token for remaining stubs / missing traits
+  const still = nfts.filter(
+    (n) => isPlaceholderImage(n.image) || !hasRealTraits(n.traits)
+  )
+  if (still.length) {
+    const listings = still.map((n) => ({
+      tokenId: String(n.tokenId),
+      contract,
+      chain,
+    }))
+    nfts = await enrichImages(nfts, listings, {
+      chain,
+      concurrency: Number(process.env.ENRICH_CONCURRENCY || 8),
+      limit: still.length,
+      onlyMissing: true,
+    })
+  }
 
   const next = {
     ...row,
@@ -350,11 +370,10 @@ export async function syncSlugItems(slug) {
     syncedAt: new Date().toISOString(),
   }
   putCollection(slug, next)
-  const filled = nfts.filter(
-    (n) => n.image && !String(n.image).includes('dicebear')
-  ).length
+  const filled = nfts.filter((n) => !isPlaceholderImage(n.image)).length
+  const withTraits = nfts.filter((n) => hasRealTraits(n.traits)).length
   console.log(
-    `[sync:items] ${slug}: ${filled}/${nfts.length} have art in ${Date.now() - t0}ms`
+    `[sync:items] ${slug}: art ${filled}/${nfts.length}, traits ${withTraits}/${nfts.length} in ${Date.now() - t0}ms`
   )
   return next
 }
@@ -417,27 +436,64 @@ export async function enrichPass() {
     // Prefer collections with most stubs first so non-Gremlin catch up
     const cols = [...listCollections()].sort((a, b) => {
       const am = (a.nfts || []).filter(
-        (n) => !n.image || String(n.image).includes('dicebear')
+        (n) => isPlaceholderImage(n.image) || !hasRealTraits(n.traits)
       ).length
       const bm = (b.nfts || []).filter(
-        (n) => !n.image || String(n.image).includes('dicebear')
+        (n) => isPlaceholderImage(n.image) || !hasRealTraits(n.traits)
       ).length
       return bm - am
     })
     for (const c of cols) {
-      const missing = unenrichedTokens(c.slug, Number(process.env.ENRICH_BATCH || 100))
+      const missing = unenrichedTokens(
+        c.slug,
+        Number(process.env.ENRICH_BATCH || 120)
+      )
       if (!missing.length) continue
       const contract = c.contractAddress
       if (!contract) continue
-      console.log(`[enrich] ${c.slug}: ${missing.length} stubs`)
+      console.log(`[enrich] ${c.slug}: ${missing.length} need art/traits`)
+
+      // Prefer catalog bulk fill first (traits + images)
+      try {
+        const filled = await fillListedFromCatalog(
+          c.slug,
+          c.nfts || [],
+          c.collectionId || `os-${c.slug}`,
+          { maxPages: 40 }
+        )
+        if (filled?.length) {
+          putCollection(c.slug, {
+            ...c,
+            nfts: filled,
+            syncedAt: new Date().toISOString(),
+            indexPhase: 'enrich-catalog',
+          })
+        }
+      } catch (e) {
+        console.warn(`[enrich] catalog ${c.slug}`, e?.message || e)
+      }
+
+      const stillMissing = unenrichedTokens(
+        c.slug,
+        Number(process.env.ENRICH_BATCH || 80)
+      )
+      if (!stillMissing.length) {
+        console.log(`[enrich] ${c.slug}: catalog filled remaining`)
+        break
+      }
+
       const patches = new Map()
       let i = 0
       const conc = Number(process.env.ENRICH_CONCURRENCY || 8)
       async function worker() {
-        while (i < missing.length) {
-          const m = missing[i++]
+        while (i < stillMissing.length) {
+          const m = stillMissing[i++]
           try {
-            const raw = await fetchNft(m.chain || 'robinhood', contract, m.tokenId)
+            const raw = await fetchNft(
+              m.chain || c.chain || 'robinhood',
+              contract,
+              m.tokenId
+            )
             if (!raw) continue
             patches.set(String(m.tokenId), {
               name: raw.name || undefined,
@@ -457,7 +513,10 @@ export async function enrichPass() {
         }
       }
       await Promise.all(
-        Array.from({ length: Math.min(conc, missing.length) }, () => worker())
+        Array.from(
+          { length: Math.min(conc, stillMissing.length) },
+          () => worker()
+        )
       )
       if (patches.size) {
         patchCollectionNfts(c.slug, patches)
