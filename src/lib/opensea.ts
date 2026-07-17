@@ -55,11 +55,17 @@ export interface OpenSeaSnapshotRow {
 
 export interface OpenSeaEventItem {
   event_type?: string
+  order_type?: string
   event_timestamp?: number | string
   order_hash?: string
   chain?: string
   protocol_data?: unknown
-  payment?: { quantity?: string; token?: { symbol?: string; decimals?: number } }
+  payment?: {
+    quantity?: string
+    token?: { symbol?: string; decimals?: number }
+    decimals?: number
+    symbol?: string
+  }
   nft?: {
     identifier?: string
     collection?: string
@@ -72,11 +78,37 @@ export interface OpenSeaEventItem {
   to_address?: string
   seller?: string
   buyer?: string
+  maker?: string
+  taker?: string
   quantity?: number
   /** v2 shape variants */
-  asset?: { name?: string; image_url?: string; token_id?: string }
+  asset?: {
+    name?: string
+    image_url?: string
+    display_image_url?: string
+    token_id?: string
+    identifier?: string
+    collection?: string
+    contract?: string
+  }
   payment_token?: { symbol?: string; decimals?: number; eth_price?: string }
   total_price?: string
+}
+
+export interface OpenSeaOfferRow {
+  order_hash?: string
+  chain?: string
+  status?: string
+  price?: { currency?: string; decimals?: number; value?: string }
+  protocol_data?: {
+    parameters?: {
+      offerer?: string
+      offer?: { startAmount?: string; endAmount?: string }[]
+      endTime?: string
+    }
+  }
+  asset?: { identifier?: string | null; contract?: string }
+  criteria?: { encoded_token_ids?: string }
 }
 
 /**
@@ -112,10 +144,15 @@ function headers(): Record<string, string> {
   return h
 }
 
-async function openSeaGet<T>(path: string): Promise<T | null> {
+async function openSeaGet<T>(path: string, attempt = 0): Promise<T | null> {
   try {
     const url = `${openSeaBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
     const res = await fetch(url, { headers: headers(), cache: 'no-store' })
+    // Brief retry on rate limit / transient errors
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 350 * (attempt + 1)))
+      return openSeaGet<T>(path, attempt + 1)
+    }
     if (!res.ok) return null
     const data = (await res.json()) as T & { errors?: string[] }
     if (data && typeof data === 'object' && 'errors' in data && data.errors?.length) {
@@ -123,6 +160,10 @@ async function openSeaGet<T>(path: string): Promise<T | null> {
     }
     return data as T
   } catch {
+    if (attempt < 1) {
+      await new Promise((r) => setTimeout(r, 250))
+      return openSeaGet<T>(path, attempt + 1)
+    }
     return null
   }
 }
@@ -242,13 +283,73 @@ export async function fetchRobinhoodCollections(
 
 export async function fetchCollectionEvents(
   slug: string,
-  limit = 20
+  limit = 50
 ): Promise<OpenSeaEventItem[]> {
-  // Prefer v2 collection events (needs key)
+  const lim = Math.min(50, Math.max(1, limit))
   const data = await openSeaGet<{ asset_events?: OpenSeaEventItem[] }>(
-    `/events/collection/${encodeURIComponent(slug)}?limit=${limit}`
+    `/events/collection/${encodeURIComponent(slug)}?limit=${lim}`
   )
   return data?.asset_events ?? []
+}
+
+/** Active collection offers (item + collection criteria). */
+export async function fetchCollectionOffers(
+  slug: string,
+  maxPages = 3
+): Promise<OpenSeaOfferRow[]> {
+  const all: OpenSeaOfferRow[] = []
+  let next: string | null | undefined = undefined
+  for (let page = 0; page < maxPages; page++) {
+    let path = `/offers/collection/${encodeURIComponent(slug)}?limit=50`
+    if (next) path += `&next=${encodeURIComponent(next)}`
+    const data = await openSeaGet<{ offers?: OpenSeaOfferRow[]; next?: string }>(path)
+    const rows = data?.offers ?? []
+    if (!rows.length) break
+    all.push(...rows)
+    next = data?.next
+    if (!next) break
+  }
+  return all
+}
+
+export function mapOpenSeaOffersToOffers(
+  collectionId: string,
+  rows: OpenSeaOfferRow[]
+): import('../types').Offer[] {
+  const out: import('../types').Offer[] = []
+  for (const r of rows) {
+    if (r.status && r.status !== 'ACTIVE') continue
+    const raw = r.price?.value ?? r.protocol_data?.parameters?.offer?.[0]?.startAmount
+    const dec = r.price?.decimals ?? 18
+    if (raw == null) continue
+    const eth = Number(raw) / 10 ** dec
+    if (!Number.isFinite(eth) || eth <= 0) continue
+    const tokenId = r.asset?.identifier
+    const isCollection =
+      !tokenId ||
+      tokenId === 'null' ||
+      r.criteria?.encoded_token_ids === '*'
+    const end = r.protocol_data?.parameters?.endTime
+    const expiresAt = end
+      ? new Date(Number(end) * 1000).toISOString()
+      : new Date(Date.now() + 86400000).toISOString()
+    const offerer = r.protocol_data?.parameters?.offerer || 'unknown'
+    out.push({
+      id: `os-offer-${r.order_hash || `${collectionId}-${eth}-${offerer}`}`,
+      type: isCollection ? 'collection' : 'item',
+      collectionId,
+      nftId:
+        !isCollection && tokenId
+          ? `${collectionId}-os-${tokenId}`
+          : undefined,
+      offerer: offerer.toLowerCase(),
+      price: +eth.toPrecision(6),
+      expiresAt,
+      createdAt: new Date().toISOString(),
+    })
+  }
+  out.sort((a, b) => b.price - a.price)
+  return out
 }
 
 /** Live refresh one collection's stats into our shape */
@@ -328,44 +429,70 @@ export function mapOpenSeaEventsToActivities(
   const acts: Activity[] = []
   for (const e of events) {
     const typeRaw = (e.event_type || '').toLowerCase()
+    const orderType = (e.order_type || '').toLowerCase()
     let type: Activity['type'] = 'transfer'
-    if (typeRaw.includes('sale') || typeRaw === 'order' || typeRaw === 'successful')
+    if (orderType.includes('item_offer') || orderType.includes('collection_offer')) {
+      type = orderType.includes('collection') ? 'collection_offer' : 'offer'
+    } else if (orderType.includes('listing') || orderType === 'item_listing') {
+      type = 'listing'
+    } else if (typeRaw.includes('sale') || typeRaw === 'successful') {
       type = 'sale'
-    else if (typeRaw.includes('list') || typeRaw === 'created') type = 'listing'
+    } else if (typeRaw === 'order') {
+      // Generic order event — prefer offer if WETH payment, else listing
+      type = orderType.includes('offer')
+        ? 'offer'
+        : orderType.includes('list')
+          ? 'listing'
+          : 'offer'
+    } else if (typeRaw.includes('list') || typeRaw === 'created') type = 'listing'
     else if (typeRaw.includes('offer') || typeRaw.includes('bid')) type = 'offer'
     else if (typeRaw.includes('transfer')) type = 'transfer'
     else if (typeRaw.includes('mint')) type = 'mint'
+    else if (typeRaw.includes('cancel')) continue
 
     const tokenId =
-      e.nft?.identifier || e.asset?.token_id || undefined
+      e.nft?.identifier ||
+      e.asset?.identifier ||
+      e.asset?.token_id ||
+      undefined
     const ts =
       typeof e.event_timestamp === 'number'
-        ? new Date(e.event_timestamp * 1000).toISOString()
+        ? new Date(
+            e.event_timestamp > 1e12
+              ? e.event_timestamp
+              : e.event_timestamp * 1000
+          ).toISOString()
         : e.event_timestamp
           ? new Date(e.event_timestamp).toISOString()
           : new Date().toISOString()
 
     let price: number | undefined
     if (e.payment?.quantity) {
-      const dec = e.payment.token?.decimals ?? 18
+      const dec = e.payment.token?.decimals ?? e.payment.decimals ?? 18
       price = Number(e.payment.quantity) / 10 ** dec
     } else if (e.total_price) {
       const dec = e.payment_token?.decimals ?? 18
       price = Number(e.total_price) / 10 ** dec
     }
 
+    const from =
+      e.maker || e.from_address || e.seller || e.buyer || 'unknown'
+    const to = e.taker || e.to_address || e.buyer
+
     acts.push({
-      id: `os-${slug}-${e.order_hash || tokenId || Math.random()}-${ts}`,
+      id: `os-${slug}-${e.order_hash || tokenId || 'x'}-${ts}-${type}`,
       type,
       collectionId,
       nftId: tokenId ? `${collectionId}-os-${tokenId}` : undefined,
-      from: shortAddr(e.from_address || e.seller || e.buyer),
-      to: e.to_address || e.buyer ? shortAddr(e.to_address || e.buyer) : undefined,
+      from: shortAddr(from),
+      to: to ? shortAddr(to) : undefined,
       price: price != null && Number.isFinite(price) ? +price.toPrecision(6) : undefined,
       timestamp: ts,
     })
   }
-  return acts
+  return acts.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  )
 }
 
 /**

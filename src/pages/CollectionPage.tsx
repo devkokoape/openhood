@@ -232,15 +232,28 @@ export function CollectionPage() {
       .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
   }, [items, user, actor, isOwnerOf])
 
-  const colOffers = useMemo(
-    () => (collection ? offers.filter((o) => o.collectionId === collection.id) : []),
-    [collection, offers]
-  )
+  const colOffers = useMemo(() => {
+    if (!collection) return []
+    // Prefer live OpenSea offers for this collection (cached + refreshed)
+    if (isOpenSeaCol && openSeaNfts.offers.length > 0) {
+      return openSeaNfts.offers
+    }
+    return offers.filter((o) => o.collectionId === collection.id)
+  }, [collection, offers, isOpenSeaCol, openSeaNfts.offers])
 
-  const colActivity = useMemo(
-    () => (collection ? activities.filter((a) => a.collectionId === collection.id) : []),
-    [collection, activities]
-  )
+  const colActivity = useMemo(() => {
+    if (!collection) return []
+    const global = activities.filter((a) => a.collectionId === collection.id)
+    if (!isOpenSeaCol) return global
+    // Merge local collection events (instant cache + live) with global feed
+    const map = new Map<string, (typeof global)[0]>()
+    for (const a of openSeaNfts.activities) map.set(a.id, a)
+    for (const a of global) if (!map.has(a.id)) map.set(a.id, a)
+    return Array.from(map.values()).sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )
+  }, [collection, activities, isOpenSeaCol, openSeaNfts.activities])
 
   const filteredActivity = useMemo(() => {
     const f = activityFilters.find((x) => x.id === activityFilter)
@@ -896,11 +909,15 @@ export function CollectionPage() {
                     </span>
                   </div>
                 )}
-                {isOpenSeaCol && openSeaNfts.loading && items.length === 0 ? (
+                {isOpenSeaCol &&
+                items.length === 0 &&
+                (openSeaNfts.loading || openSeaNfts.refreshing || !openSeaNfts.ready) ? (
                   <div className="rounded-2xl border border-edge py-20 text-center">
-                    <p className="text-ink font-medium">Loading live listings…</p>
+                    <p className="text-ink font-medium">Loading marketplace…</p>
                     <p className="text-sm text-ink-3 mt-1">
-                      Pulling the full OpenSea best-listings book for {collection.name}
+                      {openSeaNfts.fromCache
+                        ? 'Refreshing listings, offers & activity…'
+                        : `Loading live listings for ${collection.name}`}
                     </p>
                   </div>
                 ) : items.length === 0 ? (

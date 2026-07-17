@@ -1,30 +1,33 @@
 /**
- * Collection inventory — listings-first (OpenSea best listings book).
+ * Collection market data — instant local hydrate + background OpenSea sync.
  *
- * 1. Instant paint from IndexedDB cache when available
- * 2. Fetch ALL active best listings (not a few NFT pages) so listed % matches OpenSea
- * 3. Progressive image/name enrichment from the NFT endpoint
- * 4. Optional unlisted catalog pages via loadMore / loadAll
+ * On refresh: paints from localStorage/IndexedDB in the same tick (no "No items" flash).
+ * Network never replaces a non-empty catalog with an empty response.
+ * Loads listings + activity + offers together for light marketplace UX.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Nft } from '../types'
+import type { Activity, Nft, Offer } from '../types'
 import {
   cacheOpenSeaNfts,
   enrichNftsFromOpenSea,
   fetchAllBestListings,
+  fetchCollectionEvents,
+  fetchCollectionOffers,
   fetchOpenSeaCollectionNftsPage,
+  mapOpenSeaEventsToActivities,
   mapOpenSeaNftToNft,
+  mapOpenSeaOffersToOffers,
   nftsFromListings,
   type ParsedListing,
 } from '../lib/opensea'
 import {
-  getCatalogCache,
-  getCatalogCacheSync,
-  isCatalogFresh,
+  getCollectionStore,
+  getCollectionStoreSync,
+  isCollectionFresh,
   pricesFromEntries,
   pricesToEntries,
-  putCatalogCache,
-} from '../lib/catalogCache'
+  putCollectionStore,
+} from '../lib/collectionStore'
 
 function applyPrices(nfts: Nft[], prices: Map<string, number>): Nft[] {
   return nfts.map((n) => {
@@ -48,9 +51,7 @@ function mergeEnrichment(
       ...n,
       name: p.name || n.name,
       image:
-        p.image && !p.image.includes('dicebear')
-          ? p.image
-          : n.image,
+        p.image && !p.image.includes('dicebear') ? p.image : n.image,
       owner: p.owner || n.owner,
       rarityRank: p.rarityRank ?? n.rarityRank,
       traits: p.traits?.length ? p.traits : n.traits,
@@ -63,7 +64,6 @@ export function useOpenSeaCollectionNfts(
   collectionId: string | undefined,
   enabled: boolean,
   opts?: {
-    /** Collection display name for stub titles */
     namePrefix?: string
     fallbackImage?: string
     contractAddress?: string
@@ -71,59 +71,74 @@ export function useOpenSeaCollectionNfts(
     totalSupply?: number
   }
 ) {
-  const [nfts, setNfts] = useState<Nft[]>([])
-  const [loading, setLoading] = useState(false)
+  // Sync hydrate so hard refresh never starts empty when we have local data
+  const initial = slug ? getCollectionStoreSync(slug) : null
+
+  const [nfts, setNfts] = useState<Nft[]>(() => initial?.nfts ?? [])
+  const [activities, setActivities] = useState<Activity[]>(
+    () => initial?.activities ?? []
+  )
+  const [offers, setOffers] = useState<Offer[]>(() => initial?.offers ?? [])
+  const [loading, setLoading] = useState(
+    () => Boolean(enabled && slug && !(initial?.nfts?.length))
+  )
   const [refreshing, setRefreshing] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
-  const [totalLoaded, setTotalLoaded] = useState(0)
-  const [listedCount, setListedCount] = useState(0)
-  const [fromCache, setFromCache] = useState(false)
+  const [totalLoaded, setTotalLoaded] = useState(
+    () => initial?.nfts?.length ?? 0
+  )
+  const [listedCount, setListedCount] = useState(
+    () => initial?.listedCount ?? initial?.nfts?.filter((n) => n.listed).length ?? 0
+  )
+  const [fromCache, setFromCache] = useState(() => Boolean(initial?.nfts?.length))
   const [enriching, setEnriching] = useState(false)
+  const [ready, setReady] = useState(() => Boolean(initial?.nfts?.length))
 
   const nextRef = useRef<string | null>(null)
-  const pricesRef = useRef<Map<string, number>>(new Map())
+  const pricesRef = useRef<Map<string, number>>(
+    new Map(initial?.prices ? pricesFromEntries(initial.prices) : [])
+  )
   const listingsRef = useRef<ParsedListing[]>([])
-  const seenIds = useRef<Set<string>>(new Set())
+  const seenIds = useRef<Set<string>>(
+    new Set((initial?.nfts ?? []).map((n) => n.id))
+  )
   const abortGen = useRef(0)
-  const unlistedMode = useRef(false)
-
-  const reset = useCallback(() => {
-    setNfts([])
-    setError(null)
-    setHasMore(false)
-    setTotalLoaded(0)
-    setListedCount(0)
-    setFromCache(false)
-    setRefreshing(false)
-    setEnriching(false)
-    nextRef.current = null
-    pricesRef.current = new Map()
-    listingsRef.current = []
-    seenIds.current = new Set()
-    unlistedMode.current = false
-  }, [])
+  const optsRef = useRef(opts)
+  optsRef.current = opts
+  // Keep latest activities/offers for persist merges without re-running effect
+  const activitiesRef = useRef(activities)
+  const offersRef = useRef(offers)
+  activitiesRef.current = activities
+  offersRef.current = offers
 
   const persist = useCallback(
-    async (slugName: string, colId: string, list: Nft[], listed: number) => {
-      await putCatalogCache({
-        slug: slugName,
-        collectionId: colId,
-        nfts: list,
+    async (partial: {
+      slug: string
+      collectionId: string
+      nfts: Nft[]
+      listedCount: number
+      activities?: Activity[]
+      offers?: Offer[]
+    }) => {
+      await putCollectionStore({
+        slug: partial.slug,
+        collectionId: partial.collectionId,
+        nfts: partial.nfts,
         next: nextRef.current,
         prices: pricesToEntries(pricesRef.current),
-        listedCount: listed,
+        listedCount: partial.listedCount,
+        activities: partial.activities ?? activitiesRef.current,
+        offers: partial.offers ?? offersRef.current,
         updatedAt: Date.now(),
       })
     },
     []
   )
 
-  // Listings-first load
   useEffect(() => {
     if (!enabled || !slug || !collectionId) {
-      reset()
       return
     }
 
@@ -132,59 +147,148 @@ export function useOpenSeaCollectionNfts(
     const signal = { cancelled: false }
     const colId = collectionId
     const slugName = slug
-    const namePrefix = opts?.namePrefix ? `${opts.namePrefix} #` : '#'
-    const fallbackImage = opts?.fallbackImage
-    const contract = opts?.contractAddress
-    const chain = opts?.chain || 'robinhood'
+
+    const o = optsRef.current
+    const namePrefix = o?.namePrefix ? `${o.namePrefix} #` : '#'
+    const fallbackImage = o?.fallbackImage
+    const contract = o?.contractAddress
+    const chain = o?.chain || 'robinhood'
 
     ;(async () => {
       setError(null)
-      seenIds.current = new Set()
-      nextRef.current = null
-      pricesRef.current = new Map()
-      listingsRef.current = []
-      unlistedMode.current = false
 
-      // —— Instant cache ——
-      let cacheHit = getCatalogCacheSync(slugName)
-      if (!cacheHit) cacheHit = (await getCatalogCache(slugName)) ?? null
+      // 1) Sync + IDB hydrate (instant)
+      let store = getCollectionStoreSync(slugName)
+      if (!store?.nfts?.length) {
+        store = (await getCollectionStore(slugName)) ?? null
+      }
       if (cancelled || gen !== abortGen.current) return
 
-      if (cacheHit?.nfts?.length) {
-        pricesRef.current = pricesFromEntries(cacheHit.prices)
-        nextRef.current = cacheHit.next
-        for (const n of cacheHit.nfts) seenIds.current.add(n.id)
-        setNfts(cacheHit.nfts)
-        setTotalLoaded(cacheHit.nfts.length)
+      if (store?.nfts?.length) {
+        pricesRef.current = pricesFromEntries(store.prices)
+        nextRef.current = store.next
+        seenIds.current = new Set(store.nfts.map((n) => n.id))
+        setNfts(store.nfts)
+        setTotalLoaded(store.nfts.length)
         setListedCount(
-          cacheHit.listedCount ??
-            cacheHit.nfts.filter((n) => n.listed).length
+          store.listedCount || store.nfts.filter((n) => n.listed).length
         )
-        setHasMore(Boolean(cacheHit.next))
+        setActivities(store.activities || [])
+        setOffers(store.offers || [])
         setFromCache(true)
         setLoading(false)
-        cacheOpenSeaNfts(cacheHit.nfts)
+        setReady(true)
+        cacheOpenSeaNfts(store.nfts)
+      } else {
+        setLoading(true)
+      }
 
-        if (isCatalogFresh(cacheHit) && (cacheHit.listedCount ?? 0) > 20) {
-          // Soft revalidate listings count in background only
-          setRefreshing(true)
-          try {
-            const listings = await fetchAllBestListings(slugName, {
-              maxPages: 80,
-              pageSize: 200,
-            })
-            if (cancelled || gen !== abortGen.current) return
-            listingsRef.current = listings
-            const prices = new Map(listings.map((L) => [L.tokenId, L.priceEth]))
-            pricesRef.current = prices
-            const built = nftsFromListings(listings, colId, {
-              namePrefix,
-              fallbackImage,
-              contract,
-            })
-            // Preserve enriched images from cache
-            const byId = new Map(cacheHit.nfts.map((n) => [n.id, n]))
-            const merged = built.map((n) => {
+      const hadCache = Boolean(store?.nfts?.length)
+      const softOnly = hadCache && isCollectionFresh(store)
+
+      setRefreshing(true)
+      listingsRef.current = []
+      try {
+        // 2) Parallel: listings book + events + offers
+        const [listings, events, offerRows] = await Promise.all([
+          fetchAllBestListings(slugName, {
+            maxPages: 80,
+            pageSize: 200,
+            onPage: (batch, total) => {
+              if (cancelled || gen !== abortGen.current) return
+              // Progressive paint only if we had nothing yet
+              if (hadCache && softOnly) return
+              const accPrices = new Map(pricesRef.current)
+              for (const L of batch) {
+                const prev = accPrices.get(L.tokenId)
+                if (prev == null || L.priceEth < prev) {
+                  accPrices.set(L.tokenId, L.priceEth)
+                }
+              }
+              pricesRef.current = accPrices
+              listingsRef.current = [...listingsRef.current, ...batch]
+              const built = nftsFromListings(listingsRef.current, colId, {
+                namePrefix,
+                fallbackImage,
+                contract,
+              })
+              if (built.length === 0) return
+              seenIds.current = new Set(built.map((n) => n.id))
+              setNfts((prev) => {
+                // Prefer keeping enriched images from prev
+                const byId = new Map(prev.map((n) => [n.id, n]))
+                return built.map((n) => {
+                  const old = byId.get(n.id)
+                  if (!old) return n
+                  return {
+                    ...n,
+                    image:
+                      old.image && !old.image.includes('dicebear')
+                        ? old.image
+                        : n.image,
+                    name: old.name || n.name,
+                    traits: old.traits?.length > 2 ? old.traits : n.traits,
+                  }
+                })
+              })
+              setListedCount(total)
+              setTotalLoaded(built.length)
+              setLoading(false)
+              setReady(true)
+              setFromCache(false)
+              cacheOpenSeaNfts(built)
+            },
+          }),
+          fetchCollectionEvents(slugName, 50).catch(() => [] as Awaited<
+            ReturnType<typeof fetchCollectionEvents>
+          >),
+          fetchCollectionOffers(slugName, 4).catch(() => [] as Awaited<
+            ReturnType<typeof fetchCollectionOffers>
+          >),
+        ])
+
+        if (cancelled || gen !== abortGen.current) return
+
+        // Activities + offers always update (lightweight)
+        const mappedActs = mapOpenSeaEventsToActivities(slugName, colId, events)
+        const mappedOffers = mapOpenSeaOffersToOffers(colId, offerRows)
+        if (mappedActs.length) {
+          setActivities(mappedActs)
+          activitiesRef.current = mappedActs
+        }
+        if (mappedOffers.length) {
+          setOffers(mappedOffers)
+          offersRef.current = mappedOffers
+        }
+
+        // Listings: never wipe good data with empty
+        if (listings.length === 0) {
+          if (!hadCache) {
+            setError('Could not load listings from OpenSea. Retry in a moment.')
+          }
+          // Keep existing nfts from cache
+          await persist({
+            slug: slugName,
+            collectionId: colId,
+            nfts: store?.nfts ?? [],
+            listedCount: store?.listedCount ?? 0,
+            activities: mappedActs.length ? mappedActs : store?.activities,
+            offers: mappedOffers.length ? mappedOffers : store?.offers,
+          })
+        } else {
+          listingsRef.current = listings
+          const prices = new Map(listings.map((L) => [L.tokenId, L.priceEth]))
+          pricesRef.current = prices
+          let built = nftsFromListings(listings, colId, {
+            namePrefix,
+            fallbackImage,
+            contract,
+          })
+
+          // Merge enriched images from previous cache
+          if (store?.nfts?.length) {
+            const byId = new Map(store.nfts.map((n) => [n.id, n]))
+            built = built.map((n) => {
               const prev = byId.get(n.id)
               if (!prev) return n
               return {
@@ -193,137 +297,98 @@ export function useOpenSeaCollectionNfts(
                   prev.image && !prev.image.includes('dicebear')
                     ? prev.image
                     : n.image,
-                name: prev.name?.includes('#') && n.name ? n.name : prev.name || n.name,
+                name:
+                  prev.name && !prev.name.startsWith('#')
+                    ? prev.name
+                    : n.name,
                 traits: prev.traits?.length > 2 ? prev.traits : n.traits,
                 rarityRank: prev.rarityRank ?? n.rarityRank,
                 owner:
-                  prev.owner && prev.owner !== 'unknown' ? prev.owner : n.owner,
+                  prev.owner && prev.owner !== 'unknown'
+                    ? prev.owner
+                    : n.owner,
               }
             })
-            for (const n of merged) seenIds.current.add(n.id)
-            setNfts(merged)
-            setListedCount(listings.length)
-            setTotalLoaded(merged.length)
-            cacheOpenSeaNfts(merged)
-            await persist(slugName, colId, merged, listings.length)
-          } catch {
-            /* keep cache */
-          } finally {
-            if (!cancelled && gen === abortGen.current) setRefreshing(false)
-          }
-          return
-        }
-      } else {
-        setNfts([])
-        setTotalLoaded(0)
-        setListedCount(0)
-        setFromCache(false)
-        setLoading(true)
-      }
-
-      // —— Network: full listings book with progressive pages ——
-      setRefreshing(true)
-      try {
-        const acc: ParsedListing[] = []
-        const listings = await fetchAllBestListings(slugName, {
-          maxPages: 80,
-          pageSize: 200,
-          onPage: (batch, total) => {
-            if (cancelled || gen !== abortGen.current) return
-            acc.push(...batch)
-            listingsRef.current = [...acc]
-            const prices = new Map(acc.map((L) => [L.tokenId, L.priceEth]))
-            pricesRef.current = prices
-            const built = nftsFromListings(acc, colId, {
-              namePrefix,
-              fallbackImage,
-              contract,
-            })
-            for (const n of built) seenIds.current.add(n.id)
-            setNfts(built)
-            setListedCount(total)
-            setTotalLoaded(built.length)
-            setLoading(false)
-            setFromCache(false)
-            cacheOpenSeaNfts(built)
-          },
-        })
-
-        if (cancelled || gen !== abortGen.current) return
-
-        listingsRef.current = listings
-        const prices = new Map(listings.map((L) => [L.tokenId, L.priceEth]))
-        pricesRef.current = prices
-        let built = nftsFromListings(listings, colId, {
-          namePrefix,
-          fallbackImage,
-          contract,
-        })
-        seenIds.current = new Set(built.map((n) => n.id))
-        setNfts(built)
-        setListedCount(listings.length)
-        setTotalLoaded(built.length)
-        setLoading(false)
-        cacheOpenSeaNfts(built)
-        await persist(slugName, colId, built, listings.length)
-
-        // —— Enrich images/names (first 120 fast, then rest) ——
-        const contractAddr =
-          contract || listings.find((L) => L.contract)?.contract
-        if (contractAddr && listings.length > 0) {
-          setEnriching(true)
-          const items = listings.map((L) => ({
-            tokenId: L.tokenId,
-            chain: L.chain || chain,
-            contract: L.contract || contractAddr,
-          }))
-          // Prioritize cheapest (visible first in price_asc)
-          const enrichSignal = signal
-          const applyPatches = (patches: Map<string, Partial<Nft>>) => {
-            if (cancelled || gen !== abortGen.current) return
-            setNfts((prev) => {
-              const next = mergeEnrichment(prev, patches)
-              cacheOpenSeaNfts(next)
-              void persist(slugName, colId, next, listings.length)
-              return next
-            })
           }
 
-          // Phase A: first 80 (visible grid)
-          await enrichNftsFromOpenSea(items.slice(0, 80), colId, {
-            chain,
-            contract: contractAddr,
-            concurrency: 10,
-            signal: enrichSignal,
-            onProgress: applyPatches,
+          seenIds.current = new Set(built.map((n) => n.id))
+          setNfts(built)
+          setListedCount(listings.length)
+          setTotalLoaded(built.length)
+          setLoading(false)
+          setReady(true)
+          setFromCache(false)
+          cacheOpenSeaNfts(built)
+
+          await persist({
+            slug: slugName,
+            collectionId: colId,
+            nfts: built,
+            listedCount: listings.length,
+            activities: mappedActs,
+            offers: mappedOffers,
           })
-          if (cancelled || gen !== abortGen.current) return
 
-          // Phase B: remainder in background
-          if (items.length > 80) {
-            void enrichNftsFromOpenSea(items.slice(80), colId, {
+          // Image enrichment (non-blocking for grid)
+          const contractAddr =
+            contract || listings.find((L) => L.contract)?.contract
+          if (contractAddr && listings.length > 0) {
+            setEnriching(true)
+            const items = listings.map((L) => ({
+              tokenId: L.tokenId,
+              chain: L.chain || chain,
+              contract: L.contract || contractAddr,
+            }))
+            const applyPatches = (patches: Map<string, Partial<Nft>>) => {
+              if (cancelled || gen !== abortGen.current) return
+              setNfts((prev) => {
+                const next = mergeEnrichment(prev, patches)
+                cacheOpenSeaNfts(next)
+                void persist({
+                  slug: slugName,
+                  collectionId: colId,
+                  nfts: next,
+                  listedCount: listings.length,
+                })
+                return next
+              })
+            }
+
+            await enrichNftsFromOpenSea(items.slice(0, 60), colId, {
               chain,
               contract: contractAddr,
-              concurrency: 6,
-              signal: enrichSignal,
+              concurrency: 10,
+              signal,
               onProgress: applyPatches,
-            }).finally(() => {
-              if (!cancelled && gen === abortGen.current) setEnriching(false)
             })
-          } else {
-            setEnriching(false)
+            if (cancelled || gen !== abortGen.current) return
+
+            if (items.length > 60) {
+              void enrichNftsFromOpenSea(items.slice(60), colId, {
+                chain,
+                contract: contractAddr,
+                concurrency: 6,
+                signal,
+                onProgress: applyPatches,
+              }).finally(() => {
+                if (!cancelled && gen === abortGen.current) setEnriching(false)
+              })
+            } else {
+              setEnriching(false)
+            }
           }
         }
       } catch (e) {
         if (!cancelled && gen === abortGen.current) {
-          if (!getCatalogCacheSync(slugName)?.nfts?.length) {
-            setError(e instanceof Error ? e.message : 'Failed to load listings')
+          if (!hadCache) {
+            setError(e instanceof Error ? e.message : 'Failed to load collection')
           }
         }
       } finally {
         if (!cancelled && gen === abortGen.current) {
           setLoading(false)
           setRefreshing(false)
+          setReady(true)
         }
       }
     })()
@@ -332,35 +397,40 @@ export function useOpenSeaCollectionNfts(
       cancelled = true
       signal.cancelled = true
     }
-  }, [
-    enabled,
-    slug,
-    collectionId,
-    reset,
-    persist,
-    opts?.namePrefix,
-    opts?.fallbackImage,
-    opts?.contractAddress,
-    opts?.chain,
-  ])
+    // Only re-run when the collection identity changes — not when live stats tweak opts
+  }, [enabled, slug, collectionId, persist])
 
-  /** Load unlisted / more catalog items beyond the listings book */
+  // When slug changes externally, re-hydrate sync store for new slug
+  useEffect(() => {
+    if (!slug || !enabled) return
+    const s = getCollectionStoreSync(slug)
+    if (s?.nfts?.length) {
+      setNfts(s.nfts)
+      setListedCount(s.listedCount || s.nfts.filter((n) => n.listed).length)
+      setTotalLoaded(s.nfts.length)
+      setActivities(s.activities || [])
+      setOffers(s.offers || [])
+      setFromCache(true)
+      setLoading(false)
+      setReady(true)
+      pricesRef.current = pricesFromEntries(s.prices)
+      seenIds.current = new Set(s.nfts.map((n) => n.id))
+      cacheOpenSeaNfts(s.nfts)
+    }
+  }, [slug, enabled])
+
   const loadMore = useCallback(async () => {
     if (!enabled || !slug || !collectionId || loadingMore) return
     setLoadingMore(true)
-    unlistedMode.current = true
     try {
-      // Start NFT catalog cursor if needed
-      let cursor = nextRef.current
       const page = await fetchOpenSeaCollectionNftsPage(slug, {
         limit: 50,
-        next: cursor,
+        next: nextRef.current,
       })
       const mapped: Nft[] = []
       for (const raw of page.nfts) {
         const n = mapOpenSeaNftToNft(raw, collectionId, pricesRef.current)
         if (!n || seenIds.current.has(n.id)) continue
-        // Skip if already shown as listed
         if (pricesRef.current.has(String(n.tokenId))) continue
         seenIds.current.add(n.id)
         mapped.push(n)
@@ -369,14 +439,11 @@ export function useOpenSeaCollectionNfts(
       setNfts((prev) => {
         const next = applyPrices([...prev, ...mapped], pricesRef.current)
         setTotalLoaded(next.length)
-        void putCatalogCache({
+        void persist({
           slug,
           collectionId,
           nfts: next,
-          next: nextRef.current,
-          prices: pricesToEntries(pricesRef.current),
           listedCount,
-          updatedAt: Date.now(),
         })
         return next
       })
@@ -387,29 +454,28 @@ export function useOpenSeaCollectionNfts(
     } finally {
       setLoadingMore(false)
     }
-  }, [enabled, slug, collectionId, loadingMore, listedCount])
+  }, [enabled, slug, collectionId, loadingMore, listedCount, persist])
 
   const loadAll = useCallback(
     async (maxItems = 50_000) => {
       if (!enabled || !slug || !collectionId) return
       setLoadingMore(true)
-      unlistedMode.current = true
       try {
-        // Ensure we have listing book
         if (listingsRef.current.length === 0) {
           const listings = await fetchAllBestListings(slug, {
             maxPages: 80,
             pageSize: 200,
           })
-          listingsRef.current = listings
-          pricesRef.current = new Map(
-            listings.map((L) => [L.tokenId, L.priceEth])
-          )
-          setListedCount(listings.length)
+          if (listings.length) {
+            listingsRef.current = listings
+            pricesRef.current = new Map(
+              listings.map((L) => [L.tokenId, L.priceEth])
+            )
+            setListedCount(listings.length)
+          }
         }
 
         let cursor: string | null = nextRef.current
-        // If never started catalog pagination, start from beginning but skip listed
         let guard = 0
         while (seenIds.current.size < maxItems && guard < 200) {
           guard++
@@ -428,7 +494,6 @@ export function useOpenSeaCollectionNfts(
           nextRef.current = page.next
           if (mapped.length) {
             setNfts((prev) => {
-              // merge by id
               const map = new Map(prev.map((x) => [x.id, x]))
               for (const n of applyPrices(mapped, pricesRef.current)) {
                 const existing = map.get(n.id)
@@ -447,12 +512,17 @@ export function useOpenSeaCollectionNfts(
                 }
               }
               const next = Array.from(map.values()).sort((a, b) => {
-                // listed first by price, then unlisted
                 if (a.listed && !b.listed) return -1
                 if (!a.listed && b.listed) return 1
                 return (a.price ?? 1e9) - (b.price ?? 1e9)
               })
               setTotalLoaded(next.length)
+              void persist({
+                slug,
+                collectionId,
+                nfts: next,
+                listedCount,
+              })
               return next
             })
             cacheOpenSeaNfts(mapped)
@@ -467,11 +537,13 @@ export function useOpenSeaCollectionNfts(
         setLoadingMore(false)
       }
     },
-    [enabled, slug, collectionId]
+    [enabled, slug, collectionId, listedCount, persist]
   )
 
   return {
     nfts,
+    activities,
+    offers,
     loading,
     refreshing,
     loadingMore,
@@ -481,6 +553,7 @@ export function useOpenSeaCollectionNfts(
     totalLoaded,
     listedCount,
     fromCache,
+    ready,
     loadMore,
     loadAll,
     enabled,

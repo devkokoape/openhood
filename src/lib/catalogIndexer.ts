@@ -8,6 +8,10 @@ import {
   cacheOpenSeaNfts,
   enrichNftsFromOpenSea,
   fetchAllBestListings,
+  fetchCollectionEvents,
+  fetchCollectionOffers,
+  mapOpenSeaEventsToActivities,
+  mapOpenSeaOffersToOffers,
   nftsFromListings,
 } from './opensea'
 import {
@@ -94,10 +98,22 @@ export async function indexCollectionCatalog(
 
   const work = (async (): Promise<CatalogCacheEntry | null> => {
     try {
-      const listings = await fetchAllBestListings(slug, {
-        maxPages: opts?.listingPages ? Math.max(opts.listingPages, 40) : 80,
-        pageSize: 200,
-      })
+      const [listings, events, offerRows] = await Promise.all([
+        fetchAllBestListings(slug, {
+          maxPages: opts?.listingPages ? Math.max(opts.listingPages, 40) : 80,
+          pageSize: 200,
+        }),
+        fetchCollectionEvents(slug, 50).catch(() => []),
+        fetchCollectionOffers(slug, 3).catch(() => []),
+      ])
+
+      // Don't clobber a good cache with empty network
+      if (listings.length === 0) {
+        const existing = await getCatalogCache(slug)
+        if (existing?.nfts?.length) return existing
+        return null
+      }
+
       const prices = new Map(listings.map((L) => [L.tokenId, L.priceEth]))
       let built = nftsFromListings(listings, collectionId, {
         namePrefix: opts?.namePrefix ? `${opts.namePrefix} #` : '#',
@@ -137,6 +153,9 @@ export async function indexCollectionCatalog(
         }
       }
 
+      const activities = mapOpenSeaEventsToActivities(slug, collectionId, events)
+      const offers = mapOpenSeaOffersToOffers(collectionId, offerRows)
+
       cacheOpenSeaNfts(built)
       const entry: CatalogCacheEntry = {
         slug,
@@ -145,6 +164,8 @@ export async function indexCollectionCatalog(
         next: null,
         prices: pricesToEntries(prices),
         listedCount: listings.length,
+        activities,
+        offers,
         updatedAt: Date.now(),
       }
       await putCatalogCache(entry)
