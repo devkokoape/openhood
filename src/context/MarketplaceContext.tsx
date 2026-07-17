@@ -2,7 +2,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -39,6 +41,7 @@ import {
 } from '../hooks/useOpenSeaLive'
 import { useMainnetIndexer } from '../hooks/useMainnetIndexer'
 import { withRisk } from '../lib/indexer'
+import { startBackgroundCatalogIndex } from '../lib/catalogIndexer'
 import type { ChainAuction, ChainListing } from '../lib/marketplace'
 import type { IndexerReport } from '../types'
 
@@ -181,6 +184,21 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       return b.volume24h - a.volume24h
     })
   }, [indexedCollections])
+
+  /** Pre-index top OpenSea NFT catalogs into IndexedDB so collection pages open instantly. */
+  const catalogWarmStarted = useRef(false)
+  const collectionsRef = useRef(collections)
+  collectionsRef.current = collections
+  useEffect(() => {
+    if (catalogWarmStarted.current) return
+    const os = collections.filter((c) => c.source === 'opensea')
+    if (os.length < 3) return
+    catalogWarmStarted.current = true
+    // One-shot: do not clear on re-render or stats patches cancel the warm
+    window.setTimeout(() => {
+      void startBackgroundCatalogIndex(collectionsRef.current)
+    }, 1200)
+  }, [collections])
 
   const nfts = useMemo(() => {
     void tick

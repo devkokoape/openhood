@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { BadgeCheck, Flame } from 'lucide-react'
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
+import { prefetchCollectionCatalog } from '../../lib/prefetchCatalog'
 import clsx from 'clsx'
 
 interface Props {
@@ -25,6 +26,8 @@ export function NotableCollectionCard({
   return (
     <Link
       to={`/collection/${collection.slug}`}
+      onMouseEnter={() => prefetchCollectionCatalog(collection)}
+      onFocus={() => prefetchCollectionCatalog(collection)}
       className={clsx(
         'group relative flex flex-col shrink-0 w-[min(78vw,200px)] sm:w-[210px] lg:w-[220px]',
         'rounded-2xl border border-edge bg-surface overflow-hidden',

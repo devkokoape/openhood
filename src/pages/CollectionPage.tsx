@@ -771,6 +771,12 @@ export function CollectionPage() {
                 )}
                 <span className="hidden xs:inline"> items</span>
                 {openSeaNfts.loading && '…'}
+                {isOpenSeaCol && openSeaNfts.refreshing && !openSeaNfts.loading && (
+                  <span className="ml-1 text-hood/80">· updating</span>
+                )}
+                {isOpenSeaCol && openSeaNfts.fromCache && !openSeaNfts.refreshing && !openSeaNfts.loading && (
+                  <span className="ml-1 text-ink-3/80">· indexed</span>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2 ml-auto min-w-0">
@@ -855,9 +861,10 @@ export function CollectionPage() {
                 )}
                 {isOpenSeaCol && openSeaNfts.loading && items.length === 0 ? (
                   <div className="rounded-2xl border border-edge py-20 text-center">
-                    <p className="text-ink font-medium">Loading collection from OpenSea…</p>
+                    <p className="text-ink font-medium">Indexing collection…</p>
                     <p className="text-sm text-ink-3 mt-1">
-                      Fetching NFTs and live listings for {collection.name}
+                      First open pulls from OpenSea, then this collection is cached for instant
+                      reloads
                     </p>
                   </div>
                 ) : items.length === 0 ? (

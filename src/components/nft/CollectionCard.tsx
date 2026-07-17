@@ -2,11 +2,14 @@ import { Link } from 'react-router-dom'
 import { BadgeCheck } from 'lucide-react'
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
+import { prefetchCollectionCatalog } from '../../lib/prefetchCatalog'
 
 export function CollectionCard({ collection }: { collection: Collection }) {
   return (
     <Link
       to={`/collection/${collection.slug}`}
+      onMouseEnter={() => prefetchCollectionCatalog(collection)}
+      onFocus={() => prefetchCollectionCatalog(collection)}
       className="group block rounded-2xl border border-edge bg-surface overflow-hidden card-hover"
     >
       <div className="relative h-28 bg-surface-2 overflow-hidden">

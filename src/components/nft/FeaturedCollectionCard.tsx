@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { BadgeCheck, TrendingUp } from 'lucide-react'
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
+import { prefetchCollectionCatalog } from '../../lib/prefetchCatalog'
 import clsx from 'clsx'
 
 interface Props {
@@ -17,6 +18,8 @@ export function FeaturedCollectionCard({ collection, rank, className }: Props) {
   return (
     <Link
       to={`/collection/${collection.slug}`}
+      onMouseEnter={() => prefetchCollectionCatalog(collection)}
+      onFocus={() => prefetchCollectionCatalog(collection)}
       className={clsx(
         'group relative flex flex-col shrink-0 w-[min(72vw,240px)] sm:w-[260px] lg:w-[272px] rounded-2xl border border-edge bg-surface overflow-hidden',
         'transition-all duration-300 hover:-translate-y-1 hover:border-hood/50 hover:shadow-[0_12px_40px_rgba(0,200,5,0.12)]',

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { BadgeCheck, Crown, TrendingUp } from 'lucide-react'
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
+import { prefetchCollectionCatalog } from '../../lib/prefetchCatalog'
 import clsx from 'clsx'
 
 export type TrendingRange = '24h' | '1d' | '7d' | '30d' | 'all'
@@ -131,6 +132,8 @@ export function TrendingTable({
             <Link
               key={c.id}
               to={`/collection/${c.slug}`}
+              onMouseEnter={() => prefetchCollectionCatalog(c)}
+              onFocus={() => prefetchCollectionCatalog(c)}
               className="group flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-3 hover:bg-hood-muted/30 transition-colors relative overflow-hidden"
             >
               {/* Volume share bar background */}
