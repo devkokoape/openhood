@@ -1113,57 +1113,97 @@ export function CollectionPage() {
                       })}
                     </div>
 
-                    {/* Listings book + optional unlisted catalog */}
+                    {/* Listings progress — single Load more (OpenSea/ME style) */}
                     {isOpenSeaCol && (
                       <div className="mt-6 flex flex-col items-center gap-3">
-                        <p className="text-xs text-ink-3 text-center">
-                          {listedCount > 0 ? (
-                            <>
-                              {listedCount.toLocaleString()} active listings
-                              {listedPct > 0 ? ` (${listedPct}%)` : ''}
-                              {collection.items > 0 && (
-                                <> · {collection.items.toLocaleString()} supply</>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              Showing {collectionNfts.length.toLocaleString()}
-                              {collection.items > 0 && (
-                                <> of {collection.items.toLocaleString()}</>
-                              )}{' '}
-                              from OpenSea
-                            </>
-                          )}
-                          {openSeaNfts.enriching && ' · loading artwork…'}
+                        <p className="text-xs text-ink-3 text-center max-w-md">
+                          {(() => {
+                            const shown = collectionNfts.length
+                            const total =
+                              openSeaNfts.nftsTotal ||
+                              openSeaNfts.listedCount ||
+                              listedCount ||
+                              shown
+                            const active =
+                              openSeaNfts.listedCount || listedCount || total
+                            return (
+                              <>
+                                Showing{' '}
+                                <span className="font-semibold text-ink tabular-nums">
+                                  {shown.toLocaleString()}
+                                </span>
+                                {total > shown ? (
+                                  <>
+                                    {' '}
+                                    of{' '}
+                                    <span className="font-semibold text-ink tabular-nums">
+                                      {total.toLocaleString()}
+                                    </span>
+                                  </>
+                                ) : null}{' '}
+                                listings
+                                {active > 0 && active !== total ? (
+                                  <>
+                                    {' '}
+                                    · {active.toLocaleString()} active
+                                    {listedPct > 0 ? ` (${listedPct}%)` : ''}
+                                  </>
+                                ) : listedPct > 0 ? (
+                                  <> · {listedPct}% listed</>
+                                ) : null}
+                                {collection.items > 0 && (
+                                  <>
+                                    {' '}
+                                    · {collection.items.toLocaleString()} supply
+                                  </>
+                                )}
+                                {openSeaNfts.enriching && ' · loading artwork…'}
+                              </>
+                            )
+                          })()}
                         </p>
-                        <div className="flex flex-wrap justify-center gap-2">
-                          {openSeaNfts.hasMore && (
+                        {openSeaNfts.hasMore && (
+                          <Button
+                            size="md"
+                            variant="secondary"
+                            disabled={openSeaNfts.loadingMore}
+                            onClick={() => void openSeaNfts.loadMore()}
+                          >
+                            {openSeaNfts.loadingMore
+                              ? 'Loading more listings…'
+                              : 'Load more listings'}
+                          </Button>
+                        )}
+                        {openSeaNfts.capped && !openSeaNfts.hasMore && (
+                          <p className="text-[11px] text-ink-3 text-center max-w-sm">
+                            Showing the first{' '}
+                            {collectionNfts.length.toLocaleString()} listings in
+                            this browser for performance. Use trait filters to
+                            narrow the book.
+                          </p>
+                        )}
+                        {!openSeaNfts.hasMore &&
+                          !openSeaNfts.capped &&
+                          !openSeaNfts.loadingMore &&
+                          collectionNfts.length > 0 && (
+                            <p className="text-[11px] text-ink-3">
+                              All loaded listings shown
+                            </p>
+                          )}
+                        {openSeaNfts.error && (
+                          <div className="flex flex-col items-center gap-2">
+                            <p className="text-xs text-orange-500">
+                              {openSeaNfts.error}
+                            </p>
                             <Button
-                              size="md"
-                              variant="secondary"
+                              size="sm"
+                              variant="outline"
                               disabled={openSeaNfts.loadingMore}
                               onClick={() => void openSeaNfts.loadMore()}
                             >
-                              {openSeaNfts.loadingMore
-                                ? 'Loading…'
-                                : 'Load more'}
+                              Retry
                             </Button>
-                          )}
-                          {openSeaNfts.hasMore && (
-                            <Button
-                              size="md"
-                              variant="outline"
-                              disabled={openSeaNfts.loadingMore}
-                              onClick={() => void openSeaNfts.loadAll()}
-                            >
-                              {openSeaNfts.loadingMore
-                                ? 'Loading…'
-                                : 'Load more pages'}
-                            </Button>
-                          )}
-                        </div>
-                        {openSeaNfts.error && (
-                          <p className="text-xs text-orange-500">{openSeaNfts.error}</p>
+                          </div>
                         )}
                       </div>
                     )}

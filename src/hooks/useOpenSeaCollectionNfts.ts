@@ -129,11 +129,19 @@ export function useOpenSeaCollectionNfts(
   const [listedCount, setListedCount] = useState(
     () => initial?.listedCount ?? initial?.nfts?.filter((n) => n.listed).length ?? 0
   )
+  /** Server-side book size (all listed nfts), for "showing X of Y" */
+  const [nftsTotal, setNftsTotal] = useState(
+    () => initial?.listedCount ?? initial?.nfts?.length ?? 0
+  )
   const [fromCache, setFromCache] = useState(() => Boolean(initial?.nfts?.length))
   const [enriching, setEnriching] = useState(false)
   const [ready, setReady] = useState(() => Boolean(initial?.nfts?.length))
+  /** True when client memory cap stops further Load more (server may still have more) */
+  const [capped, setCapped] = useState(false)
 
   const nextRef = useRef<string | null>(null)
+  const nftsTotalRef = useRef(0)
+  nftsTotalRef.current = nftsTotal
   const pricesRef = useRef<Map<string, number>>(
     new Map(initial?.prices ? pricesFromEntries(initial.prices) : [])
   )
@@ -274,15 +282,21 @@ export function useOpenSeaCollectionNfts(
                 nftsMapped.filter((n) => n.listed).length
             )
             setTotalLoaded(nftsMapped.length)
-            const nftsTotal =
+            const totalOnServer =
               (remote as { nftsTotal?: number }).nftsTotal ||
               remote.listedCount ||
               nftsMapped.length
+            setNftsTotal(totalOnServer)
+            nftsTotalRef.current = totalOnServer
             // OpenSea-style: only first page; more via explicit Load more
-            setHasMore(
-              Boolean((remote as { hasMore?: boolean }).hasMore) ||
-                nftsMapped.length < Math.min(hardCap, nftsTotal)
+            const serverHasMore = Boolean(
+              (remote as { hasMore?: boolean }).hasMore
             )
+            const moreOnServer =
+              serverHasMore || nftsMapped.length < totalOnServer
+            const underCap = nftsMapped.length < hardCap
+            setHasMore(moreOnServer && underCap)
+            setCapped(moreOnServer && !underCap)
             // Track Fly offset for loadMore
             nextRef.current = String(nftsMapped.length)
             setActivities(acts)
@@ -785,26 +799,55 @@ export function useOpenSeaCollectionNfts(
     }
   }, [slug, enabled])
 
-  /** OpenSea/ME style: one more page only (Fly offset preferred). */
+  /** OpenSea/ME style: append one more page (Fly offset preferred). */
   const loadMore = useCallback(async () => {
     if (!enabled || !slug || !collectionId || loadingMore) return
     setLoadingMore(true)
+    setError(null)
     try {
       const hardCap = collectionNftsHardCap()
       const pageSize = collectionNftsFirstPage()
 
       if (hasIndexerUrl()) {
-        const offset = Number(nextRef.current || seenIds.current.size || 0)
-        if (offset >= hardCap) {
+        const offset = Math.max(
+          Number(nextRef.current || 0),
+          seenIds.current.size
+        )
+        if (seenIds.current.size >= hardCap) {
           setHasMore(false)
+          setCapped(true)
           return
         }
+        const take = Math.min(pageSize, hardCap - seenIds.current.size)
         const page = await fetchIndexerCollection(slug, {
           lite: true,
-          limit: pageSize,
+          limit: take,
           offset,
         })
-        const raw = page?.nfts || []
+        if (!page) {
+          setError('Could not load more listings. Try again.')
+          return
+        }
+        const totalOnServer =
+          (page as { nftsTotal?: number }).nftsTotal ||
+          page.listedCount ||
+          nftsTotalRef.current ||
+          0
+        if (totalOnServer > 0) {
+          setNftsTotal(totalOnServer)
+          nftsTotalRef.current = totalOnServer
+        }
+        if (page.listedCount != null) setListedCount(page.listedCount)
+
+        const raw = page.nfts || []
+        if (raw.length === 0) {
+          // End of book (or bad offset) — stop; keep what we already have
+          setHasMore(false)
+          setCapped(
+            totalOnServer > 0 && seenIds.current.size < totalOnServer
+          )
+          return
+        }
         const mapped = raw.map((n) => ({
           ...n,
           collectionId,
@@ -813,23 +856,38 @@ export function useOpenSeaCollectionNfts(
         }))
         const fresh = mapped.filter((n) => !seenIds.current.has(n.id))
         for (const n of fresh) seenIds.current.add(n.id)
+
+        let nextLen = 0
         setNfts((prev) => {
           const next = [...prev, ...fresh].slice(0, hardCap)
+          nextLen = next.length
           setTotalLoaded(next.length)
           void persist({
             slug,
             collectionId,
             nfts: next,
-            listedCount: page?.listedCount || listedCount,
+            listedCount: page.listedCount || listedCount,
           })
           return next
         })
-        nextRef.current = String(offset + raw.length)
-        setHasMore(
-          Boolean((page as { hasMore?: boolean } | null)?.hasMore) &&
-            offset + raw.length < hardCap
+
+        // Advance offset by what the server returned (even if some were dupes)
+        const advanced = offset + raw.length
+        nextRef.current = String(Math.max(advanced, seenIds.current.size))
+
+        const serverHasMore =
+          (page as { hasMore?: boolean }).hasMore === true ||
+          (totalOnServer > 0 && advanced < totalOnServer)
+        const underCap = nextLen < hardCap && seenIds.current.size < hardCap
+        setHasMore(Boolean(underCap && serverHasMore))
+        setCapped(
+          Boolean(
+            !underCap &&
+              (serverHasMore ||
+                (totalOnServer > 0 && seenIds.current.size < totalOnServer))
+          )
         )
-        cacheOpenSeaNfts(fresh)
+        if (fresh.length) cacheOpenSeaNfts(fresh)
         return
       }
 
@@ -849,11 +907,13 @@ export function useOpenSeaCollectionNfts(
         mapped.push(n)
       }
       nextRef.current = page.next
+      let nextLen = 0
       setNfts((prev) => {
         const next = applyPrices([...prev, ...mapped], pricesRef.current).slice(
           0,
           hardCap
         )
+        nextLen = next.length
         setTotalLoaded(next.length)
         void persist({
           slug,
@@ -863,7 +923,9 @@ export function useOpenSeaCollectionNfts(
         })
         return next
       })
-      setHasMore(Boolean(page.next) && seenIds.current.size < hardCap)
+      const underCap = nextLen < hardCap
+      setHasMore(Boolean(page.next) && underCap)
+      setCapped(Boolean(page.next) && !underCap)
       cacheOpenSeaNfts(mapped)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Load more failed')
@@ -871,18 +933,6 @@ export function useOpenSeaCollectionNfts(
       setLoadingMore(false)
     }
   }, [enabled, slug, collectionId, loadingMore, listedCount, persist])
-
-  /** A few extra pages only — never dump tens of thousands into memory. */
-  const loadAll = useCallback(async () => {
-    const cap = collectionNftsHardCap()
-    let guard = 0
-    while (guard < 4 && seenIds.current.size < cap) {
-      guard++
-      const before = seenIds.current.size
-      await loadMore()
-      if (seenIds.current.size === before) break
-    }
-  }, [loadMore])
 
   /** Replace catalog after progressive image enrich (scroll). */
   const replaceNfts = useCallback(
@@ -913,12 +963,13 @@ export function useOpenSeaCollectionNfts(
     enriching,
     error,
     hasMore,
+    capped,
     totalLoaded,
     listedCount,
+    nftsTotal,
     fromCache,
     ready,
     loadMore,
-    loadAll,
     replaceNfts,
     enabled,
   }

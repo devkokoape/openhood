@@ -45,8 +45,9 @@ export function collectionNftsFirstPage(): number {
 }
 
 export function collectionNftsHardCap(): number {
-  // Even desktop shouldn't hold thousands of NFT objects
-  return preferLiteMode() ? 96 : 160
+  // Page through large books without OOM. Desktop can hold more of a single
+  // collection; phones stay lower. Full supply (e.g. 900+) still uses Load more.
+  return preferLiteMode() ? 240 : 800
 }
 
 export function enrichWaveSize(): number {
