@@ -249,6 +249,74 @@ export function queueDepth() {
 }
 
 /**
+ * Admin: queue OpenSea → Fly download for many collections.
+ * mode:
+ *  - all: discover RH + full sync every slug
+ *  - missing: full sync only empty / stub-heavy collections
+ *  - meta: listings only (faster), then enrich pass fills art
+ */
+export async function downloadAllContent({ mode = 'all' } = {}) {
+  let discovered = 0
+  try {
+    const slugs = await discoverPass()
+    discovered = slugs?.length || 0
+  } catch (e) {
+    console.error('[download] discover', e?.message || e)
+  }
+
+  const slugs = defaultSlugs()
+  let queued = 0
+  const full = mode !== 'meta'
+
+  if (mode === 'missing') {
+    for (const slug of slugs) {
+      const c = getCollection(slug)
+      const nfts = c?.nfts || []
+      const stubs = nfts.filter(
+        (n) => isPlaceholderImage(n.image) || !hasRealTraits(n.traits)
+      ).length
+      const needs =
+        !c ||
+        !nfts.length ||
+        stubs > Math.max(5, nfts.length * 0.25)
+      if (!needs) continue
+      enqueueSync(slug, { full: true })
+      queued++
+    }
+  } else {
+    // Priority first for better UX while full chain queues
+    for (const slug of PRIORITY_SLUGS) {
+      enqueueSync(slug, { full, front: true })
+      queued++
+    }
+    for (const slug of slugs) {
+      if (PRIORITY_SLUGS.includes(slug)) continue
+      enqueueSync(slug, { full })
+      queued++
+    }
+  }
+
+  setMeta({
+    lastDownloadAt: new Date().toISOString(),
+    lastDownloadMode: mode,
+    lastDownloadQueued: queued,
+  })
+
+  return {
+    ok: true,
+    mode,
+    discovered,
+    slugCount: slugs.length,
+    queued,
+    queueDepth: queueDepth(),
+    busy: isSyncBusy(),
+    message: full
+      ? `Queued ${queued} collections for full OpenSea → Fly download (listings + art + traits). Runs in background.`
+      : `Queued ${queued} collections for listings-only (meta) download.`,
+  }
+}
+
+/**
  * Fast path: listings + offers + events + stats only (~2–5s).
  * Saves stubs so clients show prices immediately.
  */

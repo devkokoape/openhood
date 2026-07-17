@@ -7,7 +7,9 @@ import {
   Activity,
   AlertTriangle,
   BadgeCheck,
+  CloudDownload,
   Database,
+  Download,
   FlaskConical,
   Globe2,
   Info,
@@ -24,10 +26,15 @@ import { useMarketplace } from '../context/MarketplaceContext'
 import { formatPrice, timeAgo } from '../data/mockData'
 import {
   fetchAnalyticsDashboard,
+  fetchContentStatus,
   fetchIndexerStatus,
   hasIndexerUrl,
   indexerUrl,
+  triggerCollectionDownload,
+  triggerContentDownload,
   type AnalyticsDashboard,
+  type ContentStatusPayload,
+  type ContentStatusRow,
 } from '../lib/indexerApi'
 import { buildLocalDashboard } from '../lib/localAnalytics'
 import { getCollectionStoreSync } from '../lib/collectionStore'
@@ -41,10 +48,13 @@ import clsx from 'clsx'
 type RiskFilter = 'all' | CollectionRisk
 type AdminTab =
   | 'overview'
+  | 'content'
   | 'visits'
   | 'users'
   | 'data'
   | 'risk'
+
+type ContentFilter = 'all' | 'ready' | 'partial' | 'empty' | 'shell'
 
 const severityTone: Record<
   IndexerProblemSeverity,
@@ -132,6 +142,15 @@ export function AdminPage() {
     uptimeSec?: number
     memoryMb?: number
   } | null>(null)
+
+  const [content, setContent] = useState<ContentStatusPayload | null>(null)
+  const [contentLoading, setContentLoading] = useState(false)
+  const [contentError, setContentError] = useState<string | null>(null)
+  const [contentFilter, setContentFilter] = useState<ContentFilter>('all')
+  const [contentQ, setContentQ] = useState('')
+  const [downloadBusy, setDownloadBusy] = useState(false)
+  const [downloadMsg, setDownloadMsg] = useState<string | null>(null)
+  const [rowBusy, setRowBusy] = useState<string | null>(null)
 
   const dataSourceRef = useRef(dataSource)
   dataSourceRef.current = dataSource
@@ -357,6 +376,88 @@ export function AdminPage() {
     return () => window.clearInterval(id)
   }, [loadDashboard])
 
+  const loadContentStatus = useCallback(async () => {
+    setContentLoading(true)
+    setContentError(null)
+    try {
+      const c = await fetchContentStatus()
+      if (!c) {
+        setContentError('Could not load content status from Fly')
+        return
+      }
+      setContent(c)
+    } catch (e) {
+      setContentError(e instanceof Error ? e.message : 'Content status failed')
+    } finally {
+      setContentLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab !== 'content') return
+    void loadContentStatus()
+    const id = window.setInterval(() => void loadContentStatus(), 15_000)
+    return () => window.clearInterval(id)
+  }, [tab, loadContentStatus])
+
+  const runDownload = useCallback(
+    async (mode: 'all' | 'missing' | 'meta') => {
+      setDownloadBusy(true)
+      setDownloadMsg(null)
+      try {
+        const res = await triggerContentDownload(mode)
+        if (!res?.ok && res?.error) {
+          setDownloadMsg(
+            res.error === 'unauthorized'
+              ? 'Unauthorized — set ADMIN_PASS on Fly to match your admin password, then retry.'
+              : res.error
+          )
+        } else {
+          setDownloadMsg(
+            res?.message ||
+              `Queued ${res?.queued ?? 0} collections (queue depth ${res?.queueDepth ?? '—'})`
+          )
+        }
+        await loadContentStatus()
+        void loadDashboard({ silent: true })
+      } catch (e) {
+        setDownloadMsg(e instanceof Error ? e.message : 'Download failed')
+      } finally {
+        setDownloadBusy(false)
+      }
+    },
+    [loadContentStatus, loadDashboard]
+  )
+
+  const runOneDownload = useCallback(
+    async (slug: string) => {
+      setRowBusy(slug)
+      try {
+        const res = await triggerCollectionDownload(slug)
+        setDownloadMsg(res?.message || res?.error || `Queued ${slug}`)
+        await loadContentStatus()
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [loadContentStatus]
+  )
+
+  const filteredContent = useMemo(() => {
+    let list: ContentStatusRow[] = content?.collections || []
+    if (contentFilter !== 'all') {
+      list = list.filter((c) => c.status === contentFilter)
+    }
+    if (contentQ.trim()) {
+      const s = contentQ.toLowerCase()
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(s) || c.slug.toLowerCase().includes(s)
+      )
+    }
+    return list
+  }, [content, contentFilter, contentQ])
+
   const t = indexerReport.totals
 
   const filteredCols = useMemo(() => {
@@ -384,6 +485,7 @@ export function AdminPage() {
 
   const tabs: { id: AdminTab; label: string; icon: typeof Database }[] = [
     { id: 'overview', label: 'Overview', icon: Server },
+    { id: 'content', label: 'Content status', icon: CloudDownload },
     { id: 'visits', label: 'Visits & location', icon: MapPin },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'data', label: 'Data collection', icon: Database },
@@ -493,6 +595,318 @@ export function AdminPage() {
       {indexerError && (
         <div className="rounded-xl border border-[rgba(255,80,0,0.35)] bg-[rgba(255,80,0,0.08)] px-4 py-3 text-sm text-[var(--color-danger)]">
           Chain indexer: {indexerError}
+        </div>
+      )}
+
+      {/* —— CONTENT STATUS + DOWNLOAD —— */}
+      {tab === 'content' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-edge bg-surface-2/50 p-4 sm:p-5 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h2 className="text-lg font-extrabold text-ink flex items-center gap-2">
+                  <CloudDownload className="w-5 h-5 text-hood" />
+                  Fly content status
+                </h2>
+                <p className="text-sm text-ink-2 mt-1 max-w-2xl leading-relaxed">
+                  What OpenSea data is already on the Fly server (listings, art, traits). First
+                  open of a collection is slow; after Fly stores it, everyone loads faster.
+                </p>
+                {content?.lastDownloadAt && (
+                  <p className="text-xs text-ink-3 mt-2">
+                    Last bulk download: {timeAgo(content.lastDownloadAt)}
+                    {content.lastDownloadMode
+                      ? ` · mode ${content.lastDownloadMode}`
+                      : ''}
+                    {content.lastDownloadQueued != null
+                      ? ` · queued ${content.lastDownloadQueued}`
+                      : ''}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={contentLoading}
+                  onClick={() => void loadContentStatus()}
+                >
+                  <RefreshCw
+                    className={clsx('w-3.5 h-3.5', contentLoading && 'animate-spin')}
+                  />
+                  Refresh status
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={downloadBusy}
+                  onClick={() => void runDownload('missing')}
+                  title="Only collections missing listings or mostly stubs"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Fill missing
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={downloadBusy}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        'Download ALL Robinhood collections from OpenSea into Fly?\n\nThis queues background jobs (listings + art + traits). Safe to run — users keep using the site while it works.'
+                      )
+                    ) {
+                      return
+                    }
+                    void runDownload('all')
+                  }}
+                >
+                  <CloudDownload
+                    className={clsx('w-3.5 h-3.5', downloadBusy && 'animate-pulse')}
+                  />
+                  {downloadBusy ? 'Queueing…' : 'Download all → Fly'}
+                </Button>
+              </div>
+            </div>
+
+            {downloadMsg && (
+              <div className="rounded-xl border border-hood/30 bg-hood/10 px-3 py-2 text-sm text-ink">
+                {downloadMsg}
+              </div>
+            )}
+            {contentError && (
+              <div className="rounded-xl border border-[rgba(255,80,0,0.35)] bg-[rgba(255,80,0,0.08)] px-3 py-2 text-sm text-[var(--color-danger)]">
+                {contentError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {[
+                {
+                  label: 'Collections',
+                  value: content?.summary.collections ?? '—',
+                },
+                {
+                  label: 'With listings',
+                  value: content?.summary.withListings ?? '—',
+                },
+                {
+                  label: 'Ready (art+)',
+                  value: content?.summary.ready ?? '—',
+                },
+                {
+                  label: 'Partial',
+                  value: content?.summary.partial ?? '—',
+                },
+                {
+                  label: 'Empty / no list',
+                  value: content?.summary.empty ?? '—',
+                },
+                {
+                  label: 'Art enrich %',
+                  value:
+                    content?.summary.enrichPct != null
+                      ? `${content.summary.enrichPct}%`
+                      : '—',
+                },
+              ].map((k) => (
+                <div
+                  key={k.label}
+                  className="rounded-xl border border-edge bg-surface px-3 py-3"
+                >
+                  <div className="text-[10px] uppercase text-ink-3 font-bold">
+                    {k.label}
+                  </div>
+                  <div className="text-lg font-extrabold tabular-nums text-ink">
+                    {typeof k.value === 'number'
+                      ? k.value.toLocaleString()
+                      : k.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs text-ink-2">
+              <span>
+                Listed NFTs:{' '}
+                <strong className="text-ink tabular-nums">
+                  {content?.summary.totalListed?.toLocaleString() ?? '—'}
+                </strong>
+              </span>
+              <span>
+                Enriched:{' '}
+                <strong className="text-ink tabular-nums">
+                  {content?.summary.totalEnriched?.toLocaleString() ?? '—'}
+                </strong>
+              </span>
+              <span>
+                Stubs left:{' '}
+                <strong className="text-ink tabular-nums">
+                  {content?.summary.totalStubs?.toLocaleString() ?? '—'}
+                </strong>
+              </span>
+              <span>
+                Queue:{' '}
+                <strong className="text-hood tabular-nums">
+                  {content?.queueDepth ?? (content?.busy ? '…' : 0)}
+                </strong>
+                {content?.busy ? ' · busy' : ''}
+              </span>
+              {content?.media?.files != null && (
+                <span>
+                  Media cache:{' '}
+                  <strong className="text-ink">
+                    {content.media.files} files
+                    {content.media.mb != null ? ` · ${content.media.mb} MB` : ''}
+                  </strong>
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center justify-between">
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  ['all', 'All'],
+                  ['ready', 'Ready'],
+                  ['partial', 'Partial'],
+                  ['empty', 'Empty'],
+                  ['shell', 'Shell'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setContentFilter(id)}
+                  className={clsx(
+                    'px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors',
+                    contentFilter === id
+                      ? 'bg-hood text-[#0b0e11] border-hood'
+                      : 'bg-surface-2 border-edge text-ink-2 hover:border-hood/40'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input
+              value={contentQ}
+              onChange={(e) => setContentQ(e.target.value)}
+              placeholder="Filter collections…"
+              className="h-9 w-full sm:w-56 px-3 rounded-lg bg-surface-2 border border-edge text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:border-hood"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-edge bg-surface overflow-hidden">
+            <div className="px-4 py-3 border-b border-edge bg-surface-2/50 flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-extrabold text-ink">
+                  Collections on Fly
+                </h3>
+                <p className="text-[11px] text-ink-3">
+                  {filteredContent.length} shown
+                  {content ? ` of ${content.collections.length}` : ''}
+                </p>
+              </div>
+            </div>
+            {contentLoading && !content ? (
+              <div className="px-4 py-12 text-center text-sm text-ink-3">
+                Loading content status…
+              </div>
+            ) : !filteredContent.length ? (
+              <div className="px-4 py-12 text-center text-sm text-ink-3">
+                No collections match. Try Download all → Fly.
+              </div>
+            ) : (
+              <div className="overflow-x-auto table-scroll">
+                <table className="w-full text-sm min-w-[820px]">
+                  <thead>
+                    <tr className="text-left text-[10px] uppercase text-ink-3 border-b border-edge bg-surface-2">
+                      <th className="px-3 py-2">Collection</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2 text-right">Listed</th>
+                      <th className="px-3 py-2 text-right">Enriched</th>
+                      <th className="px-3 py-2 text-right">Stubs</th>
+                      <th className="px-3 py-2 text-right">Art %</th>
+                      <th className="px-3 py-2">Logo</th>
+                      <th className="px-3 py-2">Synced</th>
+                      <th className="px-3 py-2 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredContent.slice(0, 200).map((c) => (
+                      <tr
+                        key={c.slug}
+                        className="border-b border-edge last:border-0 hover:bg-surface-2/50"
+                      >
+                        <td className="px-3 py-2.5">
+                          <Link
+                            to={`/collection/${c.slug}`}
+                            className="font-semibold text-ink hover:text-hood"
+                          >
+                            {c.name}
+                          </Link>
+                          <div className="text-[10px] font-mono text-ink-3">
+                            {c.slug}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <Badge
+                            tone={
+                              c.status === 'ready'
+                                ? 'green'
+                                : c.status === 'partial'
+                                  ? 'orange'
+                                  : 'muted'
+                            }
+                          >
+                            {c.status}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-bold text-hood">
+                          {c.listedCount.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">
+                          {c.enrichedCount.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">
+                          {c.stubCount.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                          {c.enrichPct}%
+                        </td>
+                        <td className="px-3 py-2.5 text-xs">
+                          {c.hasImage ? (
+                            <span className="text-hood font-bold">yes</span>
+                          ) : (
+                            <span className="text-ink-3">no</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-ink-3 whitespace-nowrap">
+                          {c.syncedAt ? timeAgo(c.syncedAt) : '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <button
+                            type="button"
+                            disabled={rowBusy === c.slug || downloadBusy}
+                            onClick={() => void runOneDownload(c.slug)}
+                            className="text-xs font-bold text-hood hover:underline disabled:opacity-50"
+                          >
+                            {rowBusy === c.slug ? '…' : 'Sync'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filteredContent.length > 200 && (
+                  <div className="px-4 py-2 text-xs text-ink-3 border-t border-edge">
+                    Showing first 200 — use filter to narrow.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -24,9 +24,11 @@ import {
   saveToDisk,
   storageInfo,
 } from './store.js'
+import { dbContentStatus } from './db.js'
 import {
   defaultSlugs,
   discoverPass,
+  downloadAllContent,
   enrichPass,
   enqueueSync,
   isSyncBusy,
@@ -55,6 +57,12 @@ import {
 
 const PORT = Number(process.env.PORT || 8080)
 const SYNC_SECRET = (process.env.SYNC_SECRET || '').trim()
+/** Same password as site admin — allows browser admin panel to trigger downloads */
+const ADMIN_PASS = (
+  process.env.ADMIN_PASS ||
+  process.env.VITE_ADMIN_PASS ||
+  ''
+).trim()
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
 const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS || 45_000)
 
@@ -110,9 +118,14 @@ function readBody(req) {
 }
 
 function authorized(req) {
-  if (!SYNC_SECRET) return true
-  const h = req.headers['x-sync-secret'] || req.headers['x-admin-key']
-  return h === SYNC_SECRET
+  const h = String(
+    req.headers['x-sync-secret'] || req.headers['x-admin-key'] || ''
+  ).trim()
+  // Open if neither secret configured (local dev)
+  if (!SYNC_SECRET && !ADMIN_PASS) return true
+  if (SYNC_SECRET && h === SYNC_SECRET) return true
+  if (ADMIN_PASS && h === ADMIN_PASS) return true
+  return false
 }
 
 function summarize(row) {
@@ -520,8 +533,72 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname.startsWith('/v1/sync/')) {
       if (!authorized(req)) return json(res, 401, { error: 'unauthorized' })
       const slug = decodeURIComponent(pathname.slice('/v1/sync/'.length))
-      const row = await syncSlug(slug)
-      return json(res, 200, { ok: true, summary: summarize(row) })
+      if (!slug || slug === 'all') {
+        const result = await downloadAllContent({ mode: 'all' })
+        return json(res, 200, result)
+      }
+      // Queue in background so admin UI doesn't hang on long OpenSea pulls
+      enqueueSync(slug, { full: true, front: true })
+      return json(res, 200, {
+        ok: true,
+        queued: true,
+        slug,
+        queueDepth: queueDepth(),
+        message: `Queued full sync for ${slug}`,
+      })
+    }
+
+    // —— Content status (admin catalog health) ——
+    if (req.method === 'GET' && pathname === '/v1/content-status') {
+      const content = dbContentStatus()
+      const meta = getMeta()
+      return json(
+        res,
+        200,
+        {
+          generatedAt: new Date().toISOString(),
+          busy: isSyncBusy(),
+          queueDepth: queueDepth(),
+          media: mediaStats(),
+          lastDownloadAt: meta.lastDownloadAt || null,
+          lastDownloadMode: meta.lastDownloadMode || null,
+          lastDownloadQueued: meta.lastDownloadQueued || null,
+          lastError: meta.lastError || null,
+          ...content,
+        },
+        5
+      )
+    }
+
+    // —— Download all OpenSea data → Fly (discover + queue sync) ——
+    if (
+      req.method === 'POST' &&
+      (pathname === '/v1/content/download' || pathname === '/v1/download')
+    ) {
+      if (!authorized(req)) {
+        return json(res, 401, {
+          error: 'unauthorized',
+          message:
+            'Send x-admin-key header (admin password) or x-sync-secret',
+        })
+      }
+      const body = await readBody(req)
+      const mode = ['all', 'missing', 'meta'].includes(body?.mode)
+        ? body.mode
+        : 'all'
+      const result = await downloadAllContent({ mode })
+      return json(res, 200, result)
+    }
+
+    // Discover RH collections only (no full enrich)
+    if (req.method === 'POST' && pathname === '/v1/content/discover') {
+      if (!authorized(req)) return json(res, 401, { error: 'unauthorized' })
+      const slugs = await discoverPass()
+      return json(res, 200, {
+        ok: true,
+        discovered: slugs.length,
+        queueDepth: queueDepth(),
+      })
     }
 
     return json(res, 404, { error: 'not found' })

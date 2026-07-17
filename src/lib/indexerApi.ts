@@ -242,3 +242,143 @@ export interface AnalyticsDashboard {
 export async function fetchAnalyticsDashboard(): Promise<AnalyticsDashboard | null> {
   return getJson<AnalyticsDashboard>('/v1/analytics/dashboard')
 }
+
+/** Per-collection OpenSea → Fly content health */
+export interface ContentStatusRow {
+  slug: string
+  name: string
+  listedCount: number
+  nftsCount: number
+  enrichedCount: number
+  stubCount: number
+  enrichPct: number
+  hasImage: boolean
+  floorPrice: number
+  volume24h: number
+  items: number
+  syncedAt: string | null
+  contractAddress: string | null
+  status: 'ready' | 'partial' | 'empty' | 'shell'
+}
+
+export interface ContentStatusPayload {
+  generatedAt: string
+  busy: boolean
+  queueDepth: number
+  media?: { files?: number; mb?: number; bytes?: number }
+  lastDownloadAt?: string | null
+  lastDownloadMode?: string | null
+  lastDownloadQueued?: number | null
+  lastError?: string | null
+  summary: {
+    collections: number
+    withListings: number
+    empty: number
+    shell: number
+    ready: number
+    partial: number
+    withImage: number
+    totalNfts: number
+    totalListed: number
+    totalEnriched: number
+    totalStubs: number
+    enrichPct: number
+  }
+  collections: ContentStatusRow[]
+}
+
+export async function fetchContentStatus(): Promise<ContentStatusPayload | null> {
+  return getJson<ContentStatusPayload>('/v1/content-status')
+}
+
+function adminAuthHeaders(): HeadersInit {
+  const key = (
+    (import.meta.env.VITE_ADMIN_PASS as string | undefined) ||
+    (import.meta.env.VITE_SYNC_SECRET as string | undefined) ||
+    ''
+  ).trim()
+  const h: Record<string, string> = {
+    accept: 'application/json',
+    'content-type': 'application/json',
+  }
+  if (key) {
+    h['x-admin-key'] = key
+    h['x-sync-secret'] = key
+  }
+  return h
+}
+
+/**
+ * Trigger OpenSea → Fly bulk download (queued on server).
+ * mode: all | missing | meta
+ */
+export async function triggerContentDownload(
+  mode: 'all' | 'missing' | 'meta' = 'all'
+): Promise<{
+  ok?: boolean
+  error?: string
+  message?: string
+  queued?: number
+  queueDepth?: number
+  discovered?: number
+  slugCount?: number
+  mode?: string
+} | null> {
+  const base = baseUrl()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/v1/content/download`, {
+      method: 'POST',
+      headers: adminAuthHeaders(),
+      body: JSON.stringify({ mode }),
+      cache: 'no-store',
+    })
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: String(data.error || res.statusText || 'failed'),
+        message: data.message ? String(data.message) : undefined,
+      }
+    }
+    return data as {
+      ok?: boolean
+      message?: string
+      queued?: number
+      queueDepth?: number
+      discovered?: number
+      slugCount?: number
+      mode?: string
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'network error',
+    }
+  }
+}
+
+/** Queue one collection for full sync on Fly */
+export async function triggerCollectionDownload(
+  slug: string
+): Promise<{ ok?: boolean; error?: string; message?: string } | null> {
+  const base = baseUrl()
+  if (!base || !slug) return null
+  try {
+    const res = await fetch(
+      `${base}/v1/sync/${encodeURIComponent(slug)}`,
+      {
+        method: 'POST',
+        headers: adminAuthHeaders(),
+        cache: 'no-store',
+      }
+    )
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    if (!res.ok) {
+      return { ok: false, error: String(data.error || res.statusText) }
+    }
+    return { ok: true, message: data.message ? String(data.message) : `Queued ${slug}` }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'network error' }
+  }
+}

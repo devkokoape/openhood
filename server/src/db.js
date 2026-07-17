@@ -598,6 +598,122 @@ export function dbStats() {
   return { collections, nfts, enriched, listed, visits, users }
 }
 
+/**
+ * Per-collection content health for admin panel.
+ * status: ready | partial | empty | shell
+ */
+export function dbContentStatus() {
+  const database = getDb()
+  const cols = database
+    .prepare(
+      `SELECT slug, name, image, floor_price, volume_24h, listed_count, items,
+              synced_at, contract_address
+       FROM collections
+       ORDER BY listed_count DESC, volume_24h DESC`
+    )
+    .all()
+
+  const nftAgg = database
+    .prepare(
+      `SELECT slug,
+         COUNT(*) AS nfts,
+         SUM(CASE WHEN listed = 1 THEN 1 ELSE 0 END) AS listed,
+         SUM(CASE WHEN enriched = 1 THEN 1 ELSE 0 END) AS enriched,
+         SUM(CASE
+           WHEN image IS NULL OR image = '' OR image LIKE '%dicebear%'
+             OR image LIKE 'data:image/svg%' OR image LIKE '%seed=openhood%'
+           THEN 1 ELSE 0 END) AS stubs
+       FROM nfts
+       GROUP BY slug`
+    )
+    .all()
+  const bySlug = new Map(nftAgg.map((r) => [r.slug, r]))
+
+  let withListings = 0
+  let empty = 0
+  let shell = 0
+  let ready = 0
+  let partial = 0
+  let withImage = 0
+  let totalStubs = 0
+  let totalEnriched = 0
+  let totalListed = 0
+  let totalNfts = 0
+
+  const collections = cols.map((c) => {
+    const a = bySlug.get(c.slug) || {
+      nfts: 0,
+      listed: 0,
+      enriched: 0,
+      stubs: 0,
+    }
+    const listed = Number(a.listed || c.listed_count || 0)
+    const nfts = Number(a.nfts || 0)
+    const enriched = Number(a.enriched || 0)
+    const stubs = Number(a.stubs || 0)
+    const hasImage = Boolean(c.image && !String(c.image).includes('dicebear'))
+    const enrichPct =
+      listed > 0 ? Math.round((enriched / Math.max(listed, 1)) * 100) : 0
+
+    let status = 'shell'
+    if (listed === 0 && nfts === 0) {
+      status = c.synced_at ? 'empty' : 'shell'
+      empty++
+      if (!c.synced_at) shell++
+    } else if (stubs === 0 && enrichPct >= 80) {
+      status = 'ready'
+      ready++
+    } else {
+      status = 'partial'
+      partial++
+    }
+    if (listed > 0) withListings++
+    if (hasImage) withImage++
+    totalStubs += stubs
+    totalEnriched += enriched
+    totalListed += listed
+    totalNfts += nfts
+
+    return {
+      slug: c.slug,
+      name: c.name || c.slug,
+      listedCount: listed,
+      nftsCount: nfts,
+      enrichedCount: enriched,
+      stubCount: stubs,
+      enrichPct,
+      hasImage,
+      floorPrice: c.floor_price || 0,
+      volume24h: c.volume_24h || 0,
+      items: c.items || 0,
+      syncedAt: c.synced_at || null,
+      contractAddress: c.contract_address || null,
+      status,
+    }
+  })
+
+  return {
+    summary: {
+      collections: cols.length,
+      withListings,
+      empty: empty - shell > 0 ? empty - shell : empty,
+      shell,
+      ready,
+      partial,
+      withImage,
+      totalNfts,
+      totalListed,
+      totalEnriched,
+      totalStubs,
+      enrichPct:
+        totalListed > 0
+          ? Math.round((totalEnriched / totalListed) * 100)
+          : 0,
+    },
+    collections,
+  }
+}
+
 // ─── Analytics ─────────────────────────────────────────────────────────────
 
 export function dbInsertVisit(v) {
