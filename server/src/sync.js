@@ -191,7 +191,45 @@ export async function syncSlugMeta(slug) {
       console.warn(`[sync:meta] ${slug}: empty listings, keep previous`)
       return prev
     }
-    throw new Error(`No listings for ${slug}`)
+    // Collection shell so Discover still has metadata even with 0 active listings
+    const name = colMeta?.name || slug
+    const image = colMeta?.image_url || ''
+    const banner = colMeta?.banner_image_url || image
+    const floor = stats?.total?.floor_price ?? 0
+    const volume24h =
+      stats?.intervals?.find((i) => i.interval === 'one_day')?.volume ?? 0
+    const volumeTotal = stats?.total?.volume ?? 0
+    const owners = stats?.total?.num_owners ?? 0
+    const items = colMeta?.total_supply || colMeta?.unique_item_count || 0
+    const collectionId = `os-${slug}`
+    const row = {
+      slug,
+      collectionId,
+      name,
+      image,
+      banner,
+      description: colMeta?.description || `${name} on Robinhood Chain`,
+      contractAddress: colMeta?.contracts?.[0]?.address || null,
+      chain: colMeta?.contracts?.[0]?.chain || 'robinhood',
+      floorPrice: +Number(floor).toPrecision(6),
+      volume24h: +Number(volume24h).toPrecision(6),
+      volumeTotal: +Number(volumeTotal).toPrecision(6),
+      owners,
+      items,
+      listedCount: 0,
+      listedPct: 0,
+      nfts: [],
+      activities: mapEvents(slug, collectionId, events),
+      offers: mapOffers(collectionId, offerRows),
+      prices: [],
+      source: 'opensea',
+      syncedAt: new Date().toISOString(),
+      syncMs: Date.now() - t0,
+      indexPhase: 'meta-empty-book',
+    }
+    putCollection(slug, row)
+    console.warn(`[sync:meta] ${slug}: no active listings (shell saved)`)
+    return row
   }
 
   const name = colMeta?.name || slug
@@ -376,16 +414,25 @@ export async function enrichPass() {
   if (enrichBusy || busy || queueRunning) return
   enrichBusy = true
   try {
-    const cols = listCollections()
+    // Prefer collections with most stubs first so non-Gremlin catch up
+    const cols = [...listCollections()].sort((a, b) => {
+      const am = (a.nfts || []).filter(
+        (n) => !n.image || String(n.image).includes('dicebear')
+      ).length
+      const bm = (b.nfts || []).filter(
+        (n) => !n.image || String(n.image).includes('dicebear')
+      ).length
+      return bm - am
+    })
     for (const c of cols) {
-      const missing = unenrichedTokens(c.slug, Number(process.env.ENRICH_BATCH || 60))
+      const missing = unenrichedTokens(c.slug, Number(process.env.ENRICH_BATCH || 100))
       if (!missing.length) continue
       const contract = c.contractAddress
       if (!contract) continue
       console.log(`[enrich] ${c.slug}: ${missing.length} stubs`)
       const patches = new Map()
       let i = 0
-      const conc = Number(process.env.ENRICH_CONCURRENCY || 6)
+      const conc = Number(process.env.ENRICH_CONCURRENCY || 8)
       async function worker() {
         while (i < missing.length) {
           const m = missing[i++]
@@ -406,7 +453,7 @@ export async function enrichPass() {
           } catch {
             /* skip */
           }
-          await new Promise((r) => setTimeout(r, 35))
+          await new Promise((r) => setTimeout(r, 25))
         }
       }
       await Promise.all(

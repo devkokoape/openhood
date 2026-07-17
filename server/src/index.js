@@ -383,21 +383,28 @@ const server = http.createServer(async (req, res) => {
         })
       }
 
-      const lite = url.searchParams.get('lite') === '1'
-      if (lite) {
-        return json(
-          res,
-          200,
-          {
-            ...summarize(row),
-            indexPhase: row.indexPhase,
-            nfts: (row.nfts || []).slice(0, 200),
-            activities: (row.activities || []).slice(0, 40),
-            offers: (row.offers || []).slice(0, 30),
-          },
-          3
-        )
-      }
+      const lite = url.searchParams.get('lite') !== '0'
+      const limit = Math.min(
+        500,
+        Math.max(1, Number(url.searchParams.get('limit') || (lite ? 120 : 300)))
+      )
+      const offset = Math.max(0, Number(url.searchParams.get('offset') || 0))
+      const allNfts = row.nfts || []
+      const slice = allNfts.slice(offset, offset + limit)
+      // Lean cards: drop heavy traits on first paint
+      const leanNfts = lite
+        ? slice.map((n) => ({
+            id: n.id,
+            tokenId: n.tokenId,
+            name: n.name,
+            collectionId: n.collectionId,
+            image: n.image,
+            owner: n.owner,
+            listed: n.listed,
+            price: n.price,
+            rarityRank: n.rarityRank,
+          }))
+        : slice
 
       return json(
         res,
@@ -406,12 +413,16 @@ const server = http.createServer(async (req, res) => {
           ...summarize(row),
           description: row.description,
           indexPhase: row.indexPhase,
-          nfts: row.nfts || [],
-          activities: row.activities || [],
-          offers: row.offers || [],
-          prices: row.prices || [],
+          nfts: leanNfts,
+          nftsTotal: allNfts.length,
+          offset,
+          limit,
+          hasMore: offset + limit < allNfts.length,
+          activities: (row.activities || []).slice(0, lite ? 30 : 80),
+          offers: (row.offers || []).slice(0, lite ? 30 : 80),
+          prices: lite ? undefined : row.prices || [],
         },
-        3
+        5
       )
     }
 

@@ -69,11 +69,16 @@ export async function fetchIndexerStatus(): Promise<{
 
 export async function fetchIndexerCollection(
   slug: string,
-  opts?: { lite?: boolean }
+  opts?: { lite?: boolean; limit?: number; offset?: number }
 ): Promise<(IndexerCollectionPayload & { indexing?: boolean }) | null> {
   const base = baseUrl()
   if (!base) return null
-  const q = opts?.lite ? '?lite=1' : ''
+  const params = new URLSearchParams()
+  // Default lite for speed (lean NFT fields, capped count)
+  if (opts?.lite !== false) params.set('lite', '1')
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  if (opts?.offset != null) params.set('offset', String(opts.offset))
+  const q = params.toString() ? `?${params}` : ''
   try {
     const res = await fetch(
       `${base}/v1/collections/${encodeURIComponent(slug)}${q}`,
