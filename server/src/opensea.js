@@ -130,6 +130,49 @@ export async function fetchCollection(slug) {
   return openSeaGet(`/collections/${encodeURIComponent(slug)}`)
 }
 
+/**
+ * Discover ALL OpenSea collections on Robinhood chain (paginated).
+ * Returns lightweight rows: { slug, name, image, banner, contracts, total_supply }
+ */
+export async function fetchAllRobinhoodCollections({
+  maxPages = 30,
+  pageSize = 100,
+} = {}) {
+  const out = []
+  const seen = new Set()
+  let next = undefined
+
+  for (let page = 0; page < maxPages; page++) {
+    let path = `/collections?chain=robinhood&limit=${pageSize}&order_by=seven_day_volume`
+    if (next) path += `&next=${encodeURIComponent(next)}`
+    const data = await openSeaGet(path)
+    const rows = data?.collections || []
+    if (!rows.length) break
+    for (const c of rows) {
+      const slug = c.collection || c.slug
+      if (!slug || seen.has(slug)) continue
+      seen.add(slug)
+      out.push({
+        slug,
+        name: c.name || slug,
+        image: c.image_url || '',
+        banner: c.banner_image_url || c.image_url || '',
+        description: c.description || '',
+        contractAddress: c.contracts?.[0]?.address || null,
+        chain: c.contracts?.[0]?.chain || 'robinhood',
+        items: c.total_supply || c.unique_item_count || 0,
+        owner: c.owner || null,
+        openseaUrl: c.opensea_url || `https://opensea.io/collection/${slug}`,
+      })
+    }
+    next = data?.next
+    if (!next) break
+    await sleep(150)
+  }
+  console.log(`[discover] robinhood collections: ${out.length}`)
+  return out
+}
+
 export async function fetchNft(chain, contract, tokenId) {
   const data = await openSeaGet(
     `/chain/${encodeURIComponent(chain)}/contract/${encodeURIComponent(contract)}/nfts/${encodeURIComponent(String(tokenId))}`

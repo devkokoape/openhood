@@ -26,6 +26,7 @@ import {
 } from './store.js'
 import {
   defaultSlugs,
+  discoverPass,
   enrichPass,
   enqueueSync,
   isSyncBusy,
@@ -518,19 +519,24 @@ async function main() {
     console.log(`[openhood-indexer] media cache on volume · ${JSON.stringify(mediaStats())}`)
   })
 
-  // Phase 1: meta pre-index (listings + offers + events + catalog names)
+  // Phase 1: discover ALL Robinhood collections + meta pre-index
   setTimeout(() => {
     void warmPriority().catch((e) => console.error('[warm]', e))
   }, 500)
+
+  // Re-discover RH collections periodically (new drops appear automatically)
+  setInterval(() => {
+    void discoverPass().catch((e) => console.error('[discover-loop]', e))
+  }, Number(process.env.DISCOVER_INTERVAL_MS || 15 * 60_000))
 
   setInterval(() => {
     void syncOnce().catch((e) => console.error('[loop]', e))
   }, SYNC_INTERVAL_MS)
 
-  // Phase 2: fill remaining metadata stubs
+  // Phase 2: fill remaining metadata stubs (all collections)
   setInterval(() => {
     void enrichPass().catch((e) => console.error('[enrich]', e))
-  }, Number(process.env.ENRICH_INTERVAL_MS || 20_000))
+  }, Number(process.env.ENRICH_INTERVAL_MS || 15_000))
 
   // Phase 3: download token art onto Fly disk for fast serving
   setInterval(() => {

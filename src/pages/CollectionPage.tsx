@@ -43,7 +43,16 @@ import { useVisibleNftEnrich } from '../hooks/useVisibleNftEnrich'
 import { TxToast } from '../components/wallet/TxToast'
 import { RiskBadge } from '../components/nft/RiskBadge'
 import { CollectionBanner } from '../components/ui/CollectionBanner'
-import { upgradeOpenSeaImageUrl } from '../lib/opensea'
+import {
+  resolveOpenSeaCollectionBySlug,
+  upgradeOpenSeaImageUrl,
+} from '../lib/opensea'
+import {
+  fetchIndexerCollection,
+  hasIndexerUrl,
+} from '../lib/indexerApi'
+import { withRisk } from '../lib/indexer'
+import type { Collection } from '../types'
 
 type SortKey = 'price_asc' | 'price_desc' | 'id' | 'rarity_asc' | 'rarity_desc'
 type GridSize = 'sm' | 'md' | 'lg'
@@ -128,8 +137,102 @@ export function CollectionPage() {
   const [activityFilter, setActivityFilter] = useState('all')
   const { buyOnChain, mintDemo, isPending, isConfirming, waitReceipt } = useMarketplaceTx()
 
-  const collection = collections.find((c) => c.slug === slug || c.id === slug)
+  // Resolve any Robinhood collection by slug — even if not yet in Discover catalog
+  const [resolved, setResolved] = useState<Collection | null>(null)
+  const [resolveError, setResolveError] = useState<string | null>(null)
+  const [resolving, setResolving] = useState(false)
+
+  const fromCatalog = collections.find((c) => c.slug === slug || c.id === slug)
+  const collection = fromCatalog || resolved
   const isOnChainCol = collection?.id === ONCHAIN_COLLECTION_ID && chainEnabled
+  const inCatalog = Boolean(fromCatalog)
+
+  useEffect(() => {
+    if (!slug || inCatalog) {
+      setResolved(null)
+      setResolveError(null)
+      setResolving(false)
+      return
+    }
+    // Unknown slug: fetch OpenSea + Fly so deep links work for every RH collection
+    let cancelled = false
+    setResolving(true)
+    setResolveError(null)
+    ;(async () => {
+      try {
+        // Prefer Fly shell (may already have listings meta)
+        if (hasIndexerUrl()) {
+          const remote = await fetchIndexerCollection(slug, {
+            lite: true,
+            limit: 1,
+          })
+          if (
+            !cancelled &&
+            remote &&
+            (remote.name ||
+              remote.contractAddress ||
+              (remote.nfts && remote.nfts.length))
+          ) {
+            setResolved(
+              withRisk({
+                id: remote.collectionId || `os-${slug}`,
+                name: remote.name || slug,
+                slug,
+                description:
+                  remote.description ||
+                  `${remote.name || slug} on Robinhood Chain`,
+                image: remote.image || '',
+                banner: remote.banner || remote.image || '',
+                floorPrice: remote.floorPrice ?? 0,
+                volume24h: remote.volume24h ?? 0,
+                volumeTotal: remote.volumeTotal ?? 0,
+                items: remote.items ?? 0,
+                owners: remote.owners ?? 0,
+                founder: 'OpenSea',
+                verified: false,
+                openseaUrl: `https://opensea.io/collection/${slug}`,
+                chain: remote.chain || 'robinhood',
+                contractAddress: remote.contractAddress,
+                listedPct: remote.listedPct,
+                source: 'opensea',
+              })
+            )
+            setResolving(false)
+            // Still refine from OpenSea in background
+          }
+        }
+        const os = await resolveOpenSeaCollectionBySlug(slug)
+        if (cancelled) return
+        if (os) {
+          setResolved((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  ...os,
+                  image: os.image || prev.image,
+                  banner: os.banner || prev.banner,
+                  contractAddress: os.contractAddress || prev.contractAddress,
+                }
+              : os
+          )
+          setResolveError(null)
+        } else if (!cancelled) {
+          setResolveError('Collection not found on OpenSea / Robinhood')
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setResolveError(
+            e instanceof Error ? e.message : 'Failed to load collection'
+          )
+        }
+      } finally {
+        if (!cancelled) setResolving(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [slug, inCatalog])
 
   useEffect(() => {
     localStorage.setItem('openhood-grid', grid)
@@ -161,11 +264,14 @@ export function CollectionPage() {
     setSelected(new Set())
   }, [collection?.id, sweepMode])
 
-  const isOpenSeaCol = collection?.source === 'opensea'
+  // Any resolved OpenSea / RH collection loads market data (not only pre-cataloged ones)
+  const isOpenSeaCol =
+    collection?.source === 'opensea' ||
+    Boolean(resolved && collection && collection.id === resolved.id)
   const openSeaNfts = useOpenSeaCollectionNfts(
-    isOpenSeaCol ? collection?.slug : undefined,
-    isOpenSeaCol ? collection?.id : undefined,
-    Boolean(isOpenSeaCol && collection),
+    isOpenSeaCol ? collection?.slug || slug : undefined,
+    isOpenSeaCol ? collection?.id || (slug ? `os-${slug}` : undefined) : undefined,
+    Boolean(isOpenSeaCol && (collection || slug)),
     isOpenSeaCol && collection
       ? {
           namePrefix: collection.name,
@@ -174,7 +280,12 @@ export function CollectionPage() {
           chain: collection.chain || 'robinhood',
           totalSupply: collection.items,
         }
-      : undefined
+      : isOpenSeaCol && slug
+        ? {
+            namePrefix: slug,
+            chain: 'robinhood',
+          }
+        : undefined
   )
 
   const collectionNfts = useMemo(() => {
@@ -394,7 +505,18 @@ export function CollectionPage() {
   if (!collection) {
     return (
       <div className="mx-auto max-w-[1920px] px-4 py-20 text-center">
-        <p className="text-ink-2">Collection not found.</p>
+        {resolving ? (
+          <p className="text-ink-2">Loading Robinhood collection…</p>
+        ) : (
+          <>
+            <p className="text-ink-2">
+              {resolveError || 'Collection not found.'}
+            </p>
+            <p className="text-ink-3 text-sm mt-2">
+              Any OpenSea collection on Robinhood Chain is supported — check the slug.
+            </p>
+          </>
+        )}
         <Link to="/" className="text-hood text-sm mt-2 inline-block">
           Back to explore
         </Link>

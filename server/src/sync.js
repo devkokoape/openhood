@@ -8,6 +8,7 @@
 import {
   enrichImages,
   fetchAllBestListings,
+  fetchAllRobinhoodCollections,
   fetchCollection,
   fetchCollectionEvents,
   fetchCollectionOffers,
@@ -117,13 +118,89 @@ const SNAPSHOT_SLUGS = [
   'robinhoodmigos',
 ]
 
+/** Live-discovered Robinhood slugs (refreshed by discoverPass) */
+let discoveredSlugs = []
+
 export function defaultSlugs() {
   const env = (process.env.INDEX_SLUGS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  if (env.length) return [...new Set([...PRIORITY_SLUGS, ...env])]
-  return [...new Set([...PRIORITY_SLUGS, ...SNAPSHOT_SLUGS])]
+  const meta = getMeta()
+  const fromMeta = Array.isArray(meta.discoveredSlugs) ? meta.discoveredSlugs : []
+  const live = discoveredSlugs.length ? discoveredSlugs : fromMeta
+  // Also include already-indexed collections so we never drop them
+  const indexed = listCollections().map((c) => c.slug).filter(Boolean)
+  return [
+    ...new Set([
+      ...PRIORITY_SLUGS,
+      ...SNAPSHOT_SLUGS,
+      ...env,
+      ...live,
+      ...indexed,
+    ]),
+  ]
+}
+
+/**
+ * Discover every Robinhood collection on OpenSea and queue meta sync for new ones.
+ * Call on boot + periodically so new RH collections appear automatically.
+ */
+export async function discoverPass() {
+  try {
+    const rows = await fetchAllRobinhoodCollections({ maxPages: 40, pageSize: 100 })
+    if (!rows.length) {
+      console.warn('[discover] empty — keep previous slug list')
+      return defaultSlugs()
+    }
+    discoveredSlugs = rows.map((r) => r.slug)
+    setMeta({
+      discoveredSlugs,
+      discoveredAt: new Date().toISOString(),
+      discoveredCount: discoveredSlugs.length,
+    })
+
+    // Seed shells for collections we have never seen (fast discover page coverage)
+    let seeded = 0
+    for (const r of rows) {
+      if (getCollection(r.slug)) continue
+      putCollection(r.slug, {
+        slug: r.slug,
+        collectionId: `os-${r.slug}`,
+        name: r.name,
+        image: r.image,
+        banner: r.banner,
+        description: r.description || `${r.name} on Robinhood Chain`,
+        contractAddress: r.contractAddress,
+        chain: r.chain || 'robinhood',
+        floorPrice: 0,
+        volume24h: 0,
+        volumeTotal: 0,
+        owners: 0,
+        items: r.items || 0,
+        listedCount: 0,
+        listedPct: 0,
+        nfts: [],
+        activities: [],
+        offers: [],
+        prices: [],
+        source: 'opensea',
+        syncedAt: new Date().toISOString(),
+        indexPhase: 'discovered',
+      })
+      seeded++
+      // Queue meta (listings) — priority first
+      const isPriority = PRIORITY_SLUGS.includes(r.slug)
+      enqueueSync(r.slug, { full: false, front: isPriority })
+    }
+    console.log(
+      `[discover] ${discoveredSlugs.length} RH collections, seeded ${seeded} new shells`
+    )
+    return discoveredSlugs
+  } catch (e) {
+    console.error('[discover]', e?.message || e)
+    return defaultSlugs()
+  }
 }
 
 /** Serial job queue */
@@ -390,8 +467,9 @@ export async function syncSlug(slug) {
 }
 
 export async function syncOnce(slugs = defaultSlugs()) {
-  // Prefer queue so we don't stampede
-  const batchSize = Number(process.env.SYNC_BATCH || 2)
+  // Prefer queue so we don't stampede — larger batch covers whole RH chain over time
+  const batchSize = Number(process.env.SYNC_BATCH || 4)
+  if (!slugs.length) return getMeta()
   const start = cursor % slugs.length
   for (let i = 0; i < Math.min(batchSize, slugs.length); i++) {
     enqueueSync(slugs[(start + i) % slugs.length], { full: true })
@@ -405,24 +483,41 @@ export async function syncOnce(slugs = defaultSlugs()) {
   return getMeta()
 }
 
-/** Boot: meta-first for many collections (fast), then full items in queue */
+/** Boot: discover all RH → meta for many → full enrich for priority */
 export async function warmPriority() {
+  // 0) Discover every Robinhood collection from OpenSea
+  try {
+    await discoverPass()
+  } catch (e) {
+    console.error('[warm:discover]', e?.message || e)
+  }
+
   const slugs = defaultSlugs()
-  // Meta-only first pass (quick prices for everyone)
-  const metaN = Number(process.env.WARM_META_N || 20)
+  console.log(`[warm] indexing ${slugs.length} Robinhood collection slugs`)
+
+  // Meta-only first pass (listings/floor for as many as possible)
+  const metaN = Number(process.env.WARM_META_N || slugs.length)
   for (const slug of slugs.slice(0, metaN)) {
     try {
       await syncSlugMeta(slug)
     } catch (e) {
       console.error(`[warm:meta] ${slug}`, e?.message || e)
     }
-    await new Promise((r) => setTimeout(r, 250))
+    await new Promise((r) => setTimeout(r, 200))
   }
-  // Then full item enrich for top collections
-  for (const slug of PRIORITY_SLUGS.slice(0, 12)) {
+  // Full art+traits for priority + any with listings already
+  for (const slug of PRIORITY_SLUGS) {
     enqueueSync(slug, { full: true })
   }
-  setMeta({ lastFullSyncAt: new Date().toISOString() })
+  // Queue remaining discovered slugs for full enrich (serial, background)
+  for (const slug of slugs) {
+    if (PRIORITY_SLUGS.includes(slug)) continue
+    enqueueSync(slug, { full: true })
+  }
+  setMeta({
+    lastFullSyncAt: new Date().toISOString(),
+    slugQueue: slugs,
+  })
 }
 
 /**

@@ -281,6 +281,113 @@ export async function fetchRobinhoodCollections(
   return data?.collections ?? []
 }
 
+/**
+ * Paginate OpenSea until we have every Robinhood collection.
+ * Used so Discover / collection pages cover the whole chain, not a static snapshot.
+ */
+export async function fetchAllRobinhoodCollections(opts?: {
+  maxPages?: number
+  pageSize?: number
+}): Promise<OpenSeaCollectionPayload[]> {
+  const maxPages = opts?.maxPages ?? 30
+  const pageSize = opts?.pageSize ?? 100
+  const out: OpenSeaCollectionPayload[] = []
+  const seen = new Set<string>()
+  let next: string | null | undefined
+
+  for (let page = 0; page < maxPages; page++) {
+    let path = `/collections?chain=robinhood&limit=${pageSize}&order_by=seven_day_volume`
+    if (next) path += `&next=${encodeURIComponent(next)}`
+    const data = await openSeaGet<{
+      collections?: OpenSeaCollectionPayload[]
+      next?: string
+    }>(path)
+    const rows = data?.collections ?? []
+    if (!rows.length) break
+    for (const c of rows) {
+      const slug = c.collection
+      if (!slug || seen.has(slug)) continue
+      seen.add(slug)
+      out.push(c)
+    }
+    next = data?.next
+    if (!next) break
+    await new Promise((r) => setTimeout(r, 80))
+  }
+  return out
+}
+
+/** Build a Collection card from OpenSea list payload (stats filled later). */
+export function collectionFromOpenSeaListItem(
+  c: OpenSeaCollectionPayload,
+  stats?: OpenSeaStatsPayload | null
+): Collection {
+  const slug = c.collection
+  const contract = c.contracts?.[0]
+  const intervals = stats ? intervalMap(stats) : {
+    volume1d: 0,
+    sales1d: 0,
+    volume7d: 0,
+    sales7d: 0,
+    volume30d: 0,
+    sales30d: 0,
+    volumeTotal: 0,
+    salesTotal: 0,
+  }
+  const floor = stats?.total?.floor_price ?? 0
+  const rawImage =
+    c.image_url || `https://opensea.io/static/images/placeholder.png`
+  const rawBanner = c.banner_image_url || rawImage
+  const image = upgradeOpenSeaImageUrl(rawImage, 512) || rawImage
+  const banner = isVideoMediaUrl(rawBanner)
+    ? rawBanner
+    : upgradeOpenSeaImageUrl(rawBanner, 1920) || rawBanner
+
+  return withRisk({
+    id: `os-${slug}`,
+    name: c.name || slug,
+    slug,
+    description:
+      c.description || `${c.name || slug} on Robinhood Chain`,
+    image,
+    banner,
+    floorPrice: +Number(floor).toPrecision(6),
+    volume24h: +Number(intervals.volume1d).toPrecision(6),
+    volumeTotal: +Number(
+      intervals.volumeTotal || stats?.total?.volume || 0
+    ).toPrecision(6),
+    items: c.total_supply || c.unique_item_count || 0,
+    owners: stats?.total?.num_owners ?? 0,
+    founder: shortAddr(c.owner),
+    website: c.project_url || undefined,
+    twitter: c.twitter_username || undefined,
+    discord: c.discord_url || undefined,
+    verified: false,
+    openseaUrl: c.opensea_url || `https://opensea.io/collection/${slug}`,
+    chain: contract?.chain || 'robinhood',
+    contractAddress: contract?.address,
+    salesTotal: stats?.total?.sales,
+    category: c.category,
+    intervals,
+    source: 'opensea',
+  })
+}
+
+/** Resolve any Robinhood collection by slug (for deep links / missing catalog). */
+export async function resolveOpenSeaCollectionBySlug(
+  slug: string
+): Promise<Collection | null> {
+  if (!slug) return null
+  const [col, stats] = await Promise.all([
+    fetchOpenSeaCollection(slug),
+    fetchOpenSeaCollectionStats(slug),
+  ])
+  if (!col?.name && !col?.collection) return null
+  const payload = col || ({ collection: slug, name: slug } as OpenSeaCollectionPayload)
+  if (!payload.collection) payload.collection = slug
+  return collectionFromOpenSeaListItem(payload, stats)
+}
+
 export async function fetchCollectionEvents(
   slug: string,
   limit = 50
