@@ -41,6 +41,8 @@ import { useMarketplaceTx } from '../hooks/useOnChainMarket'
 import { useOpenSeaCollectionNfts } from '../hooks/useOpenSeaCollectionNfts'
 import { TxToast } from '../components/wallet/TxToast'
 import { RiskBadge } from '../components/nft/RiskBadge'
+import { CollectionBanner } from '../components/ui/CollectionBanner'
+import { upgradeOpenSeaImageUrl } from '../lib/opensea'
 
 type SortKey = 'price_asc' | 'price_desc' | 'id' | 'rarity_asc' | 'rarity_desc'
 type GridSize = 'sm' | 'md' | 'lg'
@@ -162,7 +164,16 @@ export function CollectionPage() {
   const openSeaNfts = useOpenSeaCollectionNfts(
     isOpenSeaCol ? collection?.slug : undefined,
     isOpenSeaCol ? collection?.id : undefined,
-    Boolean(isOpenSeaCol && collection)
+    Boolean(isOpenSeaCol && collection),
+    isOpenSeaCol && collection
+      ? {
+          namePrefix: collection.name,
+          fallbackImage: collection.image,
+          contractAddress: collection.contractAddress,
+          chain: collection.chain || 'robinhood',
+          totalSupply: collection.items,
+        }
+      : undefined
   )
 
   const collectionNfts = useMemo(() => {
@@ -240,7 +251,13 @@ export function CollectionPage() {
   const filterCount = activeFilterCount(filters)
   const selectedNfts = sweepable.filter((n) => selected.has(n.id))
   const sweepTotal = selectedNfts.reduce((s, n) => s + (n.price ?? 0), 0)
-  const listedCount = collectionNfts.filter((n) => n.listed).length
+  const listedCount = isOpenSeaCol
+    ? openSeaNfts.listedCount || collectionNfts.filter((n) => n.listed).length
+    : collectionNfts.filter((n) => n.listed).length
+  const listedPct =
+    collection && collection.items > 0
+      ? +((listedCount / collection.items) * 100).toFixed(1)
+      : collection?.listedPct ?? 0
   const auctionCount = collectionNfts.filter((n) => n.inAuction).length
 
   const onFiltersChange = (next: TraitFilterMap) => {
@@ -388,12 +405,12 @@ export function CollectionPage() {
           bannerHeight[bannerSize]
         )}
       >
-        <img
+        <CollectionBanner
           src={collection.banner}
+          fallbackSrc={collection.image}
           alt=""
-          className="absolute inset-0 w-full h-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10 pointer-events-none" />
 
         {/* Banner size controls — hide on very small screens to reduce clutter */}
         <div className="absolute top-2 right-2 sm:top-3 sm:right-3 z-10 flex items-center gap-0.5 sm:gap-1 rounded-lg sm:rounded-xl bg-black/45 backdrop-blur-md border border-white/15 p-0.5 sm:p-1 scale-90 sm:scale-100 origin-top-right">
@@ -451,7 +468,7 @@ export function CollectionPage() {
         >
           <div className="relative shrink-0">
             <img
-              src={collection.image}
+              src={upgradeOpenSeaImageUrl(collection.image, 512) || collection.image}
               alt={collection.name}
               className={clsx(
                 'rounded-2xl object-cover border-4 border-surface shadow-xl bg-surface transition-all duration-300',
@@ -461,6 +478,7 @@ export function CollectionPage() {
                     ? 'w-[110px] h-[110px] sm:w-[128px] sm:h-[128px]'
                     : 'w-[100px] h-[100px] sm:w-[120px] sm:h-[120px]'
               )}
+              decoding="async"
             />
             {collection.verified && (
               <span className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface flex items-center justify-center shadow">
@@ -630,7 +648,17 @@ export function CollectionPage() {
             { label: 'Total vol', value: formatPrice(collection.volumeTotal), unit: 'ETH' },
             { label: 'Items', value: collection.items.toLocaleString(), unit: '' },
             { label: 'Owners', value: collection.owners.toLocaleString(), unit: '' },
-            { label: 'Listed', value: String(listedCount), unit: '' },
+            {
+              label: 'Listed',
+              value:
+                listedPct > 0
+                  ? `${listedPct}%`
+                  : listedCount > 0
+                    ? String(listedCount)
+                    : '—',
+              unit: listedPct > 0 && listedCount > 0 ? `(${listedCount.toLocaleString()})` : '',
+              accent: listedCount > 0,
+            },
             ...(isOnChainCol
               ? [{ label: 'Auctions', value: String(auctionCount), unit: '', accent: auctionCount > 0 }]
               : []),
@@ -771,8 +799,17 @@ export function CollectionPage() {
                 )}
                 <span className="hidden xs:inline"> items</span>
                 {openSeaNfts.loading && '…'}
+                {isOpenSeaCol && listedCount > 0 && (
+                  <span className="ml-1 text-hood/90">
+                    · {listedCount.toLocaleString()} listed
+                    {listedPct > 0 ? ` (${listedPct}%)` : ''}
+                  </span>
+                )}
                 {isOpenSeaCol && openSeaNfts.refreshing && !openSeaNfts.loading && (
                   <span className="ml-1 text-hood/80">· updating</span>
+                )}
+                {isOpenSeaCol && openSeaNfts.enriching && (
+                  <span className="ml-1 text-ink-3/80">· images</span>
                 )}
                 {isOpenSeaCol && openSeaNfts.fromCache && !openSeaNfts.refreshing && !openSeaNfts.loading && (
                   <span className="ml-1 text-ink-3/80">· indexed</span>
@@ -861,10 +898,9 @@ export function CollectionPage() {
                 )}
                 {isOpenSeaCol && openSeaNfts.loading && items.length === 0 ? (
                   <div className="rounded-2xl border border-edge py-20 text-center">
-                    <p className="text-ink font-medium">Indexing collection…</p>
+                    <p className="text-ink font-medium">Loading live listings…</p>
                     <p className="text-sm text-ink-3 mt-1">
-                      First open pulls from OpenSea, then this collection is cached for instant
-                      reloads
+                      Pulling the full OpenSea best-listings book for {collection.name}
                     </p>
                   </div>
                 ) : items.length === 0 ? (
@@ -924,19 +960,31 @@ export function CollectionPage() {
                       })}
                     </div>
 
-                    {/* Pagination — full OpenSea catalog */}
+                    {/* Listings book + optional unlisted catalog */}
                     {isOpenSeaCol && (
                       <div className="mt-6 flex flex-col items-center gap-3">
                         <p className="text-xs text-ink-3 text-center">
-                          Showing {collectionNfts.length.toLocaleString()}
-                          {collection.items > 0 && (
-                            <> of {collection.items.toLocaleString()}</>
-                          )}{' '}
-                          NFTs from OpenSea
-                          {openSeaNfts.hasMore ? ' · more available' : ' · end of catalog'}
+                          {listedCount > 0 ? (
+                            <>
+                              {listedCount.toLocaleString()} active listings
+                              {listedPct > 0 ? ` (${listedPct}%)` : ''}
+                              {collection.items > 0 && (
+                                <> · {collection.items.toLocaleString()} supply</>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              Showing {collectionNfts.length.toLocaleString()}
+                              {collection.items > 0 && (
+                                <> of {collection.items.toLocaleString()}</>
+                              )}{' '}
+                              from OpenSea
+                            </>
+                          )}
+                          {openSeaNfts.enriching && ' · loading artwork…'}
                         </p>
                         <div className="flex flex-wrap justify-center gap-2">
-                          {openSeaNfts.hasMore && (
+                          {(openSeaNfts.hasMore || listedCount > 0) && (
                             <Button
                               size="md"
                               variant="secondary"
@@ -945,21 +993,19 @@ export function CollectionPage() {
                             >
                               {openSeaNfts.loadingMore
                                 ? 'Loading…'
-                                : 'Load 50 more'}
+                                : 'Load unlisted items'}
                             </Button>
                           )}
-                          {openSeaNfts.hasMore && (
-                            <Button
-                              size="md"
-                              variant="outline"
-                              disabled={openSeaNfts.loadingMore}
-                              onClick={() => void openSeaNfts.loadAll()}
-                            >
-                              {openSeaNfts.loadingMore
-                                ? 'Loading all…'
-                                : 'Load entire collection'}
-                            </Button>
-                          )}
+                          <Button
+                            size="md"
+                            variant="outline"
+                            disabled={openSeaNfts.loadingMore}
+                            onClick={() => void openSeaNfts.loadAll()}
+                          >
+                            {openSeaNfts.loadingMore
+                              ? 'Loading all…'
+                              : 'Load full catalog'}
+                          </Button>
                         </div>
                         {openSeaNfts.error && (
                           <p className="text-xs text-orange-500">{openSeaNfts.error}</p>

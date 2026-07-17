@@ -26,10 +26,14 @@ export function FeaturedCollectionCard({ collection, rank, className }: Props) {
         className
       )}
     >
-      {/* Banner */}
+      {/* Banner — video heroes fall back to logo still for card thumbs */}
       <div className="relative h-[140px] sm:h-[150px] overflow-hidden bg-surface-2">
         <img
-          src={collection.banner}
+          src={
+            collection.banner && !/\.(mp4|webm|mov)(\?|$)/i.test(collection.banner)
+              ? collection.banner
+              : collection.image
+          }
           alt=""
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
         />

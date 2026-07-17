@@ -3,12 +3,12 @@
  * Prefetches OpenSea NFT pages + listing prices into local cache so
  * collection pages open instantly instead of waiting 30–40s on demand.
  */
-import type { Collection, Nft } from '../types'
+import type { Collection } from '../types'
 import {
   cacheOpenSeaNfts,
-  fetchOpenSeaBestListingPrices,
-  fetchOpenSeaCollectionNftsPage,
-  mapOpenSeaNftToNft,
+  enrichNftsFromOpenSea,
+  fetchAllBestListings,
+  nftsFromListings,
 } from './opensea'
 import {
   getCatalogCache,
@@ -18,14 +18,12 @@ import {
   type CatalogCacheEntry,
 } from './catalogCache'
 
-/** Pages of NFTs to pre-index (50 each). 4 × 50 = 200 items ready on open. */
-const PREFETCH_NFT_PAGES = 4
-/** Listing price pages during background index. */
-const PREFETCH_LISTING_PAGES = 3
 /** How many collections to warm on app load (top by volume). */
-const PREFETCH_TOP_N = 18
+const PREFETCH_TOP_N = 12
+/** Enrich first N listed images during background warm (rest on open). */
+const PREFETCH_ENRICH = 40
 /** Delay between collections to stay friendly to OpenSea rate limits. */
-const GAP_MS = 450
+const GAP_MS = 600
 
 type IndexStatus = {
   running: boolean
@@ -64,36 +62,31 @@ export function onCatalogIndexStatus(cb: Listener): () => void {
   return () => listeners.delete(cb)
 }
 
-function applyPrices(nfts: Nft[], prices: Map<string, number>): Nft[] {
-  return nfts.map((n) => {
-    const p =
-      prices.get(String(n.tokenId)) ??
-      prices.get(n.id.split('-os-').pop() || '')
-    if (p == null) return n
-    return { ...n, listed: true, price: p }
-  })
-}
-
 /**
- * Fetch NFT catalog + listing prices for one collection and persist.
+ * Index full best-listings book for a collection (+ partial image enrich).
  * Dedupes concurrent calls for the same slug.
  */
 export async function indexCollectionCatalog(
   slug: string,
   collectionId: string,
   opts?: {
+    /** @deprecated listings-first ignores NFT page count */
     nftPages?: number
     listingPages?: number
     /** If true, skip network when cache is still fresh */
     skipIfFresh?: boolean
+    namePrefix?: string
+    fallbackImage?: string
+    contractAddress?: string
+    chain?: string
   }
 ): Promise<CatalogCacheEntry | null> {
-  const nftPages = opts?.nftPages ?? PREFETCH_NFT_PAGES
-  const listingPages = opts?.listingPages ?? PREFETCH_LISTING_PAGES
-
   if (opts?.skipIfFresh !== false) {
     const existing = await getCatalogCache(slug)
-    if (isCatalogFresh(existing)) return existing
+    // Require a real listings book (not the old 4-item cache)
+    if (isCatalogFresh(existing) && (existing?.listedCount ?? 0) > 20) {
+      return existing
+    }
   }
 
   const existingInflight = inflight.get(slug)
@@ -101,48 +94,57 @@ export async function indexCollectionCatalog(
 
   const work = (async (): Promise<CatalogCacheEntry | null> => {
     try {
-      // Wave 1: first NFT page + listing prices in parallel (fast first paint path)
-      const [prices, first] = await Promise.all([
-        fetchOpenSeaBestListingPrices(slug, listingPages),
-        fetchOpenSeaCollectionNftsPage(slug, { limit: 50 }),
-      ])
+      const listings = await fetchAllBestListings(slug, {
+        maxPages: opts?.listingPages ? Math.max(opts.listingPages, 40) : 80,
+        pageSize: 200,
+      })
+      const prices = new Map(listings.map((L) => [L.tokenId, L.priceEth]))
+      let built = nftsFromListings(listings, collectionId, {
+        namePrefix: opts?.namePrefix ? `${opts.namePrefix} #` : '#',
+        fallbackImage: opts?.fallbackImage,
+        contract: opts?.contractAddress,
+      })
 
-      const seen = new Set<string>()
-      const all: Nft[] = []
-      let next = first.next
-
-      for (const raw of first.nfts) {
-        const n = mapOpenSeaNftToNft(raw, collectionId, prices)
-        if (!n || seen.has(n.id)) continue
-        seen.add(n.id)
-        all.push(n)
-      }
-
-      // Remaining NFT pages
-      for (let i = 1; i < nftPages && next; i++) {
-        const page = await fetchOpenSeaCollectionNftsPage(slug, {
-          limit: 50,
-          next,
-        })
-        for (const raw of page.nfts) {
-          const n = mapOpenSeaNftToNft(raw, collectionId, prices)
-          if (!n || seen.has(n.id)) continue
-          seen.add(n.id)
-          all.push(n)
+      const contract =
+        opts?.contractAddress || listings.find((L) => L.contract)?.contract
+      if (contract && built.length > 0) {
+        const patches = await enrichNftsFromOpenSea(
+          listings.slice(0, PREFETCH_ENRICH).map((L) => ({
+            tokenId: L.tokenId,
+            chain: L.chain || opts?.chain || 'robinhood',
+            contract: L.contract || contract,
+          })),
+          collectionId,
+          {
+            chain: opts?.chain || 'robinhood',
+            contract,
+            concurrency: 8,
+          }
+        )
+        if (patches.size) {
+          built = built.map((n) => {
+            const p = patches.get(String(n.tokenId))
+            if (!p) return n
+            return {
+              ...n,
+              name: p.name || n.name,
+              image: p.image || n.image,
+              owner: p.owner || n.owner,
+              rarityRank: p.rarityRank ?? n.rarityRank,
+              traits: p.traits?.length ? p.traits : n.traits,
+            }
+          })
         }
-        next = page.next
-        if (!page.next) break
       }
 
-      const withPrices = applyPrices(all, prices)
-      cacheOpenSeaNfts(withPrices)
-
+      cacheOpenSeaNfts(built)
       const entry: CatalogCacheEntry = {
         slug,
         collectionId,
-        nfts: withPrices,
-        next,
+        nfts: built,
+        next: null,
         prices: pricesToEntries(prices),
+        listedCount: listings.length,
         updatedAt: Date.now(),
       }
       await putCatalogCache(entry)
@@ -203,9 +205,11 @@ export function startBackgroundCatalogIndex(
 
       try {
         await indexCollectionCatalog(c.slug, c.id, {
-          nftPages: PREFETCH_NFT_PAGES,
-          listingPages: PREFETCH_LISTING_PAGES,
           skipIfFresh: true,
+          namePrefix: c.name,
+          fallbackImage: c.image,
+          contractAddress: c.contractAddress,
+          chain: c.chain || 'robinhood',
         })
       } catch {
         /* continue queue */
@@ -226,11 +230,16 @@ export function startBackgroundCatalogIndex(
 /** Prioritize a collection the user just opened (cancels "fresh skip"). */
 export function prioritizeCollectionIndex(
   slug: string,
-  collectionId: string
+  collectionId: string,
+  extra?: {
+    namePrefix?: string
+    fallbackImage?: string
+    contractAddress?: string
+    chain?: string
+  }
 ): Promise<CatalogCacheEntry | null> {
   return indexCollectionCatalog(slug, collectionId, {
-    nftPages: PREFETCH_NFT_PAGES,
-    listingPages: PREFETCH_LISTING_PAGES,
     skipIfFresh: false,
+    ...extra,
   })
 }

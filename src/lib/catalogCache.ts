@@ -5,7 +5,7 @@
 import type { Nft } from '../types'
 import { cacheOpenSeaNfts } from './opensea'
 
-const DB_NAME = 'openhood-catalog-v1'
+const DB_NAME = 'openhood-catalog-v2'
 const STORE = 'collections'
 const DB_VERSION = 1
 
@@ -16,6 +16,8 @@ export interface CatalogCacheEntry {
   next: string | null
   /** tokenId string → ETH price */
   prices: [string, number][]
+  /** Full active listing count from OpenSea best-listings book */
+  listedCount?: number
   updatedAt: number
 }
 

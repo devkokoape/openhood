@@ -19,9 +19,11 @@ export function prefetchCollectionCatalog(c: Collection | undefined | null): voi
 
   warmed.add(c.slug)
   void indexCollectionCatalog(c.slug, c.id, {
-    nftPages: 4,
-    listingPages: 3,
     skipIfFresh: true,
+    namePrefix: c.name,
+    fallbackImage: c.image,
+    contractAddress: c.contractAddress,
+    chain: c.chain || 'robinhood',
   }).catch(() => {
     warmed.delete(c.slug)
   })

@@ -160,9 +160,14 @@ export function mapOpenSeaToCollection(
   const intervals = intervalMap(s)
   const contract = c.contracts?.[0]
   const floor = s.total?.floor_price ?? 0
-  const image =
+  const rawImage =
     c.image_url || `https://opensea.io/static/images/placeholder.png`
-  const banner = c.banner_image_url || image
+  const rawBanner = c.banner_image_url || rawImage
+  // High-res stills; leave video banners intact for <video> playback
+  const image = upgradeOpenSeaImageUrl(rawImage, 512) || rawImage
+  const banner = isVideoMediaUrl(rawBanner)
+    ? rawBanner
+    : upgradeOpenSeaImageUrl(rawBanner, 1920) || rawBanner
 
   const base: Collection = {
     id: `${idPrefix}-${row.slug}`,
@@ -438,13 +443,31 @@ export interface OpenSeaNftsPage {
 export interface OpenSeaListingRow {
   order_hash?: string
   chain?: string
+  type?: string
+  status?: string
   price?: { current?: { currency?: string; decimals?: number; value?: string } }
   asset?: { identifier?: string; contract?: string }
   protocol_data?: {
     parameters?: {
+      offerer?: string
       offer?: { token?: string; identifierOrCriteria?: string }[]
+      consideration?: {
+        startAmount?: string
+        endAmount?: string
+        recipient?: string
+      }[]
     }
   }
+}
+
+/** Parsed best listing used to build marketplace inventory. */
+export interface ParsedListing {
+  tokenId: string
+  contract?: string
+  chain?: string
+  priceEth: number
+  seller?: string
+  orderHash?: string
 }
 
 /** In-memory cache so detail pages can resolve live OpenSea NFTs */
@@ -460,6 +483,51 @@ export function getCachedOpenSeaNft(id: string): Nft | undefined {
 
 export function openSeaNftId(collectionId: string, tokenId: string | number): string {
   return `${collectionId}-os-${tokenId}`
+}
+
+/** True when a media URL is a video banner (OpenSea often ships hero as mp4). */
+export function isVideoMediaUrl(url?: string | null): boolean {
+  if (!url) return false
+  const path = url.split('?')[0].toLowerCase()
+  return (
+    path.endsWith('.mp4') ||
+    path.endsWith('.webm') ||
+    path.endsWith('.mov') ||
+    path.includes('/video') ||
+    path.includes('image_type_hero') && path.endsWith('.mp4')
+  )
+}
+
+/**
+ * Prefer higher-resolution OpenSea / Seadn CDN variants when possible.
+ * i2c/raw2 often serve originals; i.seadn.io accepts w= for scaling.
+ */
+export function upgradeOpenSeaImageUrl(url?: string | null, width = 1200): string {
+  if (!url) return ''
+  try {
+    const u = new URL(url)
+    const host = u.hostname
+    if (host.includes('seadn.io') || host.includes('openseauserdata.com')) {
+      // Avoid upscaling video
+      if (isVideoMediaUrl(url)) return url
+      if (!u.searchParams.has('w')) u.searchParams.set('w', String(width))
+      if (!u.searchParams.has('auto')) u.searchParams.set('auto', 'format')
+      return u.toString()
+    }
+  } catch {
+    /* keep raw */
+  }
+  return url
+}
+
+export function pickBestNftImage(raw: {
+  image_url?: string
+  display_image_url?: string
+  display_animation_url?: string
+}): string {
+  // Prefer full image_url over display thumbnails
+  const primary = raw.image_url || raw.display_image_url || ''
+  return upgradeOpenSeaImageUrl(primary, 1000)
 }
 
 export function mapOpenSeaNftToNft(
@@ -478,8 +546,7 @@ export function mapOpenSeaNftToNft(
     'unknown'
   const price = priceByToken?.get(tokenIdStr)
   const image =
-    raw.image_url ||
-    raw.display_image_url ||
+    pickBestNftImage(raw) ||
     `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${tokenIdStr}`
 
   const traits = (raw.traits || [])
@@ -509,6 +576,98 @@ export function mapOpenSeaNftToNft(
   }
 }
 
+export function parseListingRow(L: OpenSeaListingRow): ParsedListing | null {
+  if (L.status && L.status !== 'ACTIVE') return null
+  const tokenId =
+    L.asset?.identifier ||
+    L.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria
+  if (tokenId == null || tokenId === '') return null
+
+  let eth = 0
+  const raw = L.price?.current?.value
+  const dec = L.price?.current?.decimals ?? 18
+  if (raw != null) {
+    eth = Number(raw) / 10 ** dec
+  }
+  // Fallback: sum seller consideration (item 0 is usually seller proceeds+fees split)
+  if (!Number.isFinite(eth) || eth <= 0) {
+    const cons = L.protocol_data?.parameters?.consideration
+    if (cons?.length) {
+      let wei = 0n
+      for (const c of cons) {
+        const a = c.startAmount || c.endAmount
+        if (a) {
+          try {
+            wei += BigInt(a)
+          } catch {
+            /* skip */
+          }
+        }
+      }
+      eth = Number(wei) / 1e18
+    }
+  }
+  if (!Number.isFinite(eth) || eth <= 0) return null
+
+  const seller = L.protocol_data?.parameters?.offerer?.toLowerCase()
+  return {
+    tokenId: String(tokenId),
+    contract:
+      L.asset?.contract || L.protocol_data?.parameters?.offer?.[0]?.token,
+    chain: L.chain,
+    priceEth: +eth.toPrecision(8),
+    seller,
+    orderHash: L.order_hash,
+  }
+}
+
+/** Build listed NFT cards from best-listings (marketplace inventory). */
+export function nftsFromListings(
+  listings: ParsedListing[],
+  collectionId: string,
+  opts?: { namePrefix?: string; fallbackImage?: string; contract?: string }
+): Nft[] {
+  const byToken = new Map<string, ParsedListing>()
+  for (const L of listings) {
+    const prev = byToken.get(L.tokenId)
+    if (!prev || L.priceEth < prev.priceEth) byToken.set(L.tokenId, L)
+  }
+
+  const out: Nft[] = []
+  for (const L of byToken.values()) {
+    const tokenIdNum = Number(L.tokenId)
+    const id = openSeaNftId(collectionId, L.tokenId)
+    const cached = nftCache.get(id)
+    const fallback =
+      opts?.fallbackImage ||
+      `https://api.dicebear.com/7.x/shapes/svg?seed=${collectionId}-${L.tokenId}&backgroundColor=0b0e11,00c805`
+
+    out.push({
+      id,
+      tokenId: Number.isSafeInteger(tokenIdNum)
+        ? tokenIdNum
+        : parseInt(L.tokenId, 10) || 0,
+      name: cached?.name || `${opts?.namePrefix || '#'}${L.tokenId}`,
+      collectionId,
+      image: cached?.image && !cached.image.includes('dicebear') ? cached.image : fallback,
+      owner: L.seller || cached?.owner || 'unknown',
+      listed: true,
+      price: L.priceEth,
+      rarityRank: cached?.rarityRank,
+      traits: cached?.traits?.length
+        ? cached.traits
+        : [
+            { trait_type: 'Status', value: 'Listed' },
+            { trait_type: 'Token ID', value: L.tokenId },
+          ],
+    })
+  }
+
+  // Floor-first like OpenSea
+  out.sort((a, b) => (a.price ?? 0) - (b.price ?? 0))
+  return out
+}
+
 /** Page of NFTs for a collection slug (max 50 per request). */
 export async function fetchOpenSeaCollectionNftsPage(
   slug: string,
@@ -524,37 +683,143 @@ export async function fetchOpenSeaCollectionNftsPage(
   }
 }
 
-/** Best listings → tokenId → ETH price */
-export async function fetchOpenSeaBestListingPrices(
+/** Single NFT metadata (image, name, traits, owner). */
+export async function fetchOpenSeaNft(
+  chain: string,
+  contract: string,
+  tokenId: string | number
+): Promise<OpenSeaNftPayload | null> {
+  const data = await openSeaGet<{ nft?: OpenSeaNftPayload }>(
+    `/chain/${encodeURIComponent(chain)}/contract/${encodeURIComponent(contract)}/nfts/${encodeURIComponent(String(tokenId))}`
+  )
+  return data?.nft ?? null
+}
+
+/**
+ * Fetch ALL best listings for a collection (price ascending).
+ * OpenSea allows limit up to 200 — we page until exhausted.
+ */
+export async function fetchAllBestListings(
   slug: string,
-  maxPages = 4
-): Promise<Map<string, number>> {
-  const prices = new Map<string, number>()
+  opts?: { maxPages?: number; pageSize?: number; onPage?: (rows: ParsedListing[], total: number) => void }
+): Promise<ParsedListing[]> {
+  const maxPages = opts?.maxPages ?? 80
+  const pageSize = Math.min(200, Math.max(1, opts?.pageSize ?? 200))
+  const all: ParsedListing[] = []
+  const seen = new Set<string>()
   let next: string | null | undefined = undefined
+
   for (let page = 0; page < maxPages; page++) {
-    let path = `/listings/collection/${encodeURIComponent(slug)}/best?limit=50`
+    let path = `/listings/collection/${encodeURIComponent(slug)}/best?limit=${pageSize}`
     if (next) path += `&next=${encodeURIComponent(next)}`
     const data = await openSeaGet<{ listings?: OpenSeaListingRow[]; next?: string }>(
       path
     )
     const listings = data?.listings ?? []
+    if (listings.length === 0) break
+
+    const batch: ParsedListing[] = []
     for (const L of listings) {
-      const id =
-        L.asset?.identifier ||
-        L.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria
-      const raw = L.price?.current?.value
-      const dec = L.price?.current?.decimals ?? 18
-      if (id == null || raw == null) continue
-      const eth = Number(raw) / 10 ** dec
-      if (Number.isFinite(eth) && eth > 0) {
-        const prev = prices.get(id)
-        if (prev == null || eth < prev) prices.set(id, +eth.toPrecision(6))
+      const parsed = parseListingRow(L)
+      if (!parsed) continue
+      if (seen.has(parsed.tokenId)) {
+        // Keep cheaper listing
+        const idx = all.findIndex((x) => x.tokenId === parsed.tokenId)
+        if (idx >= 0 && parsed.priceEth < all[idx].priceEth) {
+          all[idx] = parsed
+        }
+        continue
       }
+      seen.add(parsed.tokenId)
+      batch.push(parsed)
+      all.push(parsed)
     }
+    opts?.onPage?.(batch, all.length)
     next = data?.next
-    if (!next || listings.length === 0) break
+    if (!next) break
+  }
+
+  all.sort((a, b) => a.priceEth - b.priceEth)
+  return all
+}
+
+/** Best listings → tokenId → ETH price (full book by default). */
+export async function fetchOpenSeaBestListingPrices(
+  slug: string,
+  maxPages = 40
+): Promise<Map<string, number>> {
+  const listings = await fetchAllBestListings(slug, { maxPages, pageSize: 200 })
+  const prices = new Map<string, number>()
+  for (const L of listings) {
+    const prev = prices.get(L.tokenId)
+    if (prev == null || L.priceEth < prev) prices.set(L.tokenId, L.priceEth)
   }
   return prices
+}
+
+/**
+ * Enrich listed stubs with real images/names/traits from the NFT endpoint.
+ * Concurrent pool; calls onProgress with updated map of tokenId → partial Nft.
+ */
+export async function enrichNftsFromOpenSea(
+  items: { tokenId: string | number; chain?: string; contract?: string }[],
+  _collectionId: string,
+  opts?: {
+    chain?: string
+    contract?: string
+    concurrency?: number
+    signal?: { cancelled: boolean }
+    onProgress?: (partial: Map<string, Partial<Nft>>) => void
+  }
+): Promise<Map<string, Partial<Nft>>> {
+  void _collectionId
+  const chain = opts?.chain || 'robinhood'
+  const contract = opts?.contract
+  const concurrency = opts?.concurrency ?? 8
+  const out = new Map<string, Partial<Nft>>()
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < items.length) {
+      if (opts?.signal?.cancelled) return
+      const i = cursor++
+      const row = items[i]
+      const c = row.contract || contract
+      if (!c) continue
+      const tid = String(row.tokenId)
+      try {
+        const raw = await fetchOpenSeaNft(row.chain || chain, c, tid)
+        if (!raw || opts?.signal?.cancelled) continue
+        const image = pickBestNftImage(raw)
+        const owner = raw.owners?.[0]?.address?.toLowerCase()
+        const traits = (raw.traits || [])
+          .filter((t) => t.trait_type != null && t.value != null && t.value !== '')
+          .map((t) => ({
+            trait_type: String(t.trait_type),
+            value: String(t.value),
+          }))
+        const patch: Partial<Nft> = {
+          name: raw.name || undefined,
+          image: image || undefined,
+          owner: owner || undefined,
+          rarityRank: raw.rarity?.rank,
+          traits: traits.length ? traits : undefined,
+        }
+        out.set(tid, patch)
+        if (opts?.onProgress && (out.size % 6 === 0 || out.size === items.length)) {
+          opts.onProgress(new Map(out))
+        }
+      } catch {
+        /* skip token */
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  )
+  opts?.onProgress?.(out)
+  return out
 }
 
 export const OPENSEA_DOCS = {
