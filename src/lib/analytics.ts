@@ -1,9 +1,9 @@
 /**
- * Client analytics → Fly indexer.
+ * Client analytics → local storage always + Fly indexer when configured.
  * Tracks page views, coarse location (timezone/locale), wallet when connected.
- * No browser geolocation permission prompt.
  */
 import { hasIndexerUrl, indexerUrl } from './indexerApi'
+import { recordLocalVisit } from './localAnalytics'
 
 const SESSION_KEY = 'openhood-sid-v1'
 const LAST_PATH_KEY = 'openhood-analytics-last'
@@ -32,7 +32,6 @@ function screenInfo(): string {
   }
 }
 
-/** Optional country from Intl (not precise, no permission needed) */
 function localeRegion(): { locale: string; language: string; timezone: string } {
   let locale = 'en'
   let language = 'en'
@@ -55,10 +54,10 @@ export type VisitPayload = {
 }
 
 /**
- * Fire-and-forget page visit. Safe to call often (server dedupes).
+ * Always records locally (admin works offline). Also posts to Fly when URL set.
  */
 export function trackPageView(payload: VisitPayload): void {
-  if (!hasIndexerUrl() || typeof window === 'undefined') return
+  if (typeof window === 'undefined') return
 
   const path = payload.path || window.location.pathname
   try {
@@ -73,10 +72,21 @@ export function trackPageView(payload: VisitPayload): void {
     /* ignore */
   }
 
+  // 1) Local admin data (works without Fly)
+  recordLocalVisit({
+    path,
+    page: payload.page || path,
+    wallet: payload.wallet || null,
+    theme: payload.theme,
+  })
+
+  // 2) Server when configured
+  if (!hasIndexerUrl()) return
+
   const { locale, language, timezone } = localeRegion()
-  // Derive coarse country-ish from locale e.g. en-US → US
   const parts = locale.split('-')
-  const countryCode = parts.length > 1 ? parts[parts.length - 1].toUpperCase() : null
+  const countryCode =
+    parts.length > 1 ? parts[parts.length - 1].toUpperCase() : null
 
   const body = {
     sessionId: sessionId(),
@@ -96,7 +106,6 @@ export function trackPageView(payload: VisitPayload): void {
 
   const url = `${indexerUrl()}/v1/analytics/visit`
   try {
-    // prefer sendBeacon for unload-friendly; fallback fetch
     const blob = new Blob([JSON.stringify(body)], { type: 'application/json' })
     if (navigator.sendBeacon && navigator.sendBeacon(url, blob)) return
   } catch {
@@ -110,6 +119,6 @@ export function trackPageView(payload: VisitPayload): void {
     keepalive: true,
     mode: 'cors',
   }).catch(() => {
-    /* offline / indexer down */
+    /* offline */
   })
 }

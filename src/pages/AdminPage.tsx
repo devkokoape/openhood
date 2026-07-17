@@ -29,6 +29,8 @@ import {
   indexerUrl,
   type AnalyticsDashboard,
 } from '../lib/indexerApi'
+import { buildLocalDashboard } from '../lib/localAnalytics'
+import { getCollectionStoreSync } from '../lib/collectionStore'
 import { RiskBadge } from '../components/nft/RiskBadge'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -116,6 +118,7 @@ export function AdminPage() {
   >('all')
   const [q, setQ] = useState('')
   const [dash, setDash] = useState<AnalyticsDashboard | null>(null)
+  const [dataSource, setDataSource] = useState<'server' | 'local'>('local')
   const [dashError, setDashError] = useState<string | null>(null)
   const [dashLoading, setDashLoading] = useState(false)
   const [flyStatus, setFlyStatus] = useState<{
@@ -129,35 +132,126 @@ export function AdminPage() {
     memoryMb?: number
   } | null>(null)
 
-  const loadDashboard = useCallback(async () => {
-    if (!hasIndexerUrl()) {
-      setDash(null)
-      setDashError(null)
-      return
+  /** Market stats from browser (always available) */
+  const marketPatch = useMemo(() => {
+    const os = collections.filter((c) => c.source === 'opensea')
+    let listedFromCache = 0
+    const lastSyncs = os.slice(0, 40).map((c) => {
+      const cached = getCollectionStoreSync(c.slug)
+      const listed =
+        cached?.listedCount ||
+        cached?.nfts?.filter((n) => n.listed).length ||
+        0
+      listedFromCache += listed
+      return {
+        slug: c.slug,
+        name: c.name,
+        listedCount: listed,
+        activityCount: cached?.activities?.length || 0,
+        offerCount: cached?.offers?.length || 0,
+        floorPrice: c.floorPrice,
+        volume24h: c.volume24h,
+        syncedAt: cached?.updatedAt
+          ? new Date(cached.updatedAt).toISOString()
+          : undefined,
+        syncMs: undefined as number | undefined,
+      }
+    })
+    return {
+      collectionsIndexed: collections.length,
+      listedTotal: listedFromCache,
+      activityTotal: lastSyncs.reduce((s, x) => s + x.activityCount, 0),
+      offersTotal: lastSyncs.reduce((s, x) => s + x.offerCount, 0),
+      volume24h: collections.reduce((s, c) => s + (c.volume24h || 0), 0),
+      volumeTotal: collections.reduce((s, c) => s + (c.volumeTotal || 0), 0),
+      lastSyncs: lastSyncs.sort(
+        (a, b) => (b.listedCount || 0) - (a.listedCount || 0)
+      ),
+      openSeaLive: openSeaStatus.live,
+      hasApiKey: openSeaStatus.hasApiKey,
     }
+  }, [collections, openSeaStatus.live, openSeaStatus.hasApiKey])
+
+  const loadDashboard = useCallback(async () => {
     setDashLoading(true)
     setDashError(null)
+
+    // Always have local baseline immediately
+    const local = buildLocalDashboard(marketPatch)
+    setDash(local)
+    setDataSource('local')
+
+    if (!hasIndexerUrl()) {
+      setFlyStatus(null)
+      setDashLoading(false)
+      return
+    }
+
     try {
       const [d, s] = await Promise.all([
         fetchAnalyticsDashboard(),
         fetchIndexerStatus(),
       ])
-      if (d) setDash(d)
-      else setDashError('Dashboard unreachable — is the Fly indexer running?')
       if (s) setFlyStatus({ ...s, ok: true })
       else setFlyStatus({ ok: false, error: 'Unreachable' })
+
+      if (d && (d.visits || d.dataCollection)) {
+        // Merge: prefer server visits/users; keep richer of data collection
+        const merged: AnalyticsDashboard = {
+          ...d,
+          dataCollection: {
+            collectionsIndexed: Math.max(
+              d.dataCollection?.collectionsIndexed || 0,
+              marketPatch.collectionsIndexed
+            ),
+            listedTotal: Math.max(
+              d.dataCollection?.listedTotal || 0,
+              marketPatch.listedTotal
+            ),
+            activityTotal: Math.max(
+              d.dataCollection?.activityTotal || 0,
+              marketPatch.activityTotal
+            ),
+            offersTotal: Math.max(
+              d.dataCollection?.offersTotal || 0,
+              marketPatch.offersTotal
+            ),
+            volume24h:
+              (d.dataCollection?.volume24h || 0) > 0
+                ? d.dataCollection.volume24h
+                : marketPatch.volume24h,
+            volumeTotal:
+              (d.dataCollection?.volumeTotal || 0) > 0
+                ? d.dataCollection.volumeTotal
+                : marketPatch.volumeTotal,
+            lastSyncs:
+              d.dataCollection?.lastSyncs?.length
+                ? d.dataCollection.lastSyncs
+                : marketPatch.lastSyncs,
+          },
+        }
+        setDash(merged)
+        setDataSource('server')
+      } else {
+        setDashError(
+          'Fly indexer online check failed — showing browser-local analytics'
+        )
+        setDash(local)
+        setDataSource('local')
+      }
     } catch {
-      setDashError('Failed to load analytics')
+      setDashError('Fly unreachable — showing browser-local analytics')
       setFlyStatus({ ok: false, error: 'Error' })
+      setDash(local)
+      setDataSource('local')
     } finally {
       setDashLoading(false)
     }
-  }, [])
+  }, [marketPatch])
 
   useEffect(() => {
     void loadDashboard()
-    if (!hasIndexerUrl()) return
-    const id = window.setInterval(() => void loadDashboard(), 30_000)
+    const id = window.setInterval(() => void loadDashboard(), 20_000)
     return () => window.clearInterval(id)
   }, [loadDashboard])
 
@@ -268,16 +362,24 @@ export function AdminPage() {
         ))}
       </div>
 
-      {!hasIndexerUrl() && (
-        <div className="rounded-xl border border-edge bg-surface-2/60 px-4 py-3 text-sm text-ink-2">
-          <strong className="text-ink">Indexer not configured.</strong> Visits, locations, and
-          server stats need Fly. Set <code className="text-hood">VITE_INDEXER_URL</code> after{' '}
-          <code className="text-ink">fly deploy</code> (see <code className="text-ink">server/README.md</code>
-          ). Risk tables below still work from the browser.
+      <div className="rounded-xl border border-edge bg-surface-2/60 px-4 py-3 text-sm text-ink-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
+        <div>
+          <strong className="text-ink">Data source: </strong>
+          {dataSource === 'server' ? (
+            <span className="text-hood font-semibold">Fly indexer (shared)</span>
+          ) : (
+            <span className="text-ink font-semibold">This browser (local)</span>
+          )}
+          {' · '}
+          Visits, users, and location work from local storage now. Deploy Fly + set{' '}
+          <code className="text-hood text-xs">VITE_INDEXER_URL</code> for multi-user / real IP geo.
         </div>
-      )}
+        <Badge tone={dataSource === 'server' ? 'green' : 'blue'}>
+          {dataSource === 'server' ? 'server' : 'local'}
+        </Badge>
+      </div>
 
-      {dashError && hasIndexerUrl() && (
+      {dashError && (
         <div className="rounded-xl border border-[rgba(255,80,0,0.35)] bg-[rgba(255,80,0,0.08)] px-4 py-3 text-sm text-[var(--color-danger)]">
           {dashError}
         </div>
@@ -297,48 +399,71 @@ export function AdminPage() {
               <div className="flex items-center gap-2 text-ink-3 text-xs font-bold uppercase">
                 <Server className="w-3.5 h-3.5 text-hood" /> Server
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <Badge tone={hasIndexerUrl() && flyStatus?.ok ? 'green' : 'muted'}>
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                <Badge tone={hasIndexerUrl() && flyStatus?.ok ? 'green' : dataSource === 'local' ? 'blue' : 'muted'}>
                   {hasIndexerUrl()
                     ? flyStatus?.ok
-                      ? 'online'
-                      : 'offline'
-                    : 'not set'}
+                      ? 'fly online'
+                      : 'fly offline'
+                    : 'local mode'}
                 </Badge>
                 {flyStatus?.busy && <Badge tone="orange">syncing</Badge>}
+                <Badge tone={openSeaStatus.live ? 'green' : 'muted'}>
+                  os {openSeaStatus.live ? 'live' : 'idle'}
+                </Badge>
               </div>
               <div className="mt-2 text-xs text-ink-2 space-y-1">
                 <div className="truncate font-mono text-[11px]">
-                  {hasIndexerUrl() ? indexerUrl() : '—'}
+                  {hasIndexerUrl() ? indexerUrl() : 'Browser · no VITE_INDEXER_URL'}
                 </div>
-                <div>
-                  Uptime{' '}
-                  <span className="font-semibold text-ink">
-                    {formatUptime(dash?.server.uptimeSec ?? flyStatus?.uptimeSec)}
-                  </span>
-                  {(dash?.server.memoryMb ?? flyStatus?.memoryMb) != null && (
-                    <>
-                      {' '}
-                      · RAM{' '}
+                {dataSource === 'server' ? (
+                  <>
+                    <div>
+                      Uptime{' '}
                       <span className="font-semibold text-ink">
-                        {dash?.server.memoryMb ?? flyStatus?.memoryMb} MB
+                        {formatUptime(dash?.server.uptimeSec ?? flyStatus?.uptimeSec)}
                       </span>
-                    </>
-                  )}
-                </div>
+                      {(dash?.server.memoryMb ?? flyStatus?.memoryMb) != null && (
+                        <>
+                          {' '}
+                          · RAM{' '}
+                          <span className="font-semibold text-ink">
+                            {dash?.server.memoryMb ?? flyStatus?.memoryMb} MB
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <div>
+                      Last market sync:{' '}
+                      <span className="font-semibold text-ink">
+                        {dash?.server.lastFullSyncAt
+                          ? timeAgo(dash.server.lastFullSyncAt)
+                          : flyStatus?.lastFullSyncAt
+                            ? timeAgo(flyStatus.lastFullSyncAt)
+                            : '—'}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    Client collections:{' '}
+                    <span className="font-semibold text-ink">{collections.length}</span>
+                    {' · '}
+                    OpenSea key:{' '}
+                    <span className="font-semibold text-ink">
+                      {openSeaStatus.hasApiKey ? 'yes' : 'no'}
+                    </span>
+                  </div>
+                )}
                 <div>
-                  OpenSea key:{' '}
+                  OpenSea key (server):{' '}
                   <span className="font-semibold text-ink">
-                    {dash?.server.hasOpenSeaKey ? 'yes' : 'unknown / no'}
-                  </span>
-                </div>
-                <div>
-                  Last market sync:{' '}
-                  <span className="font-semibold text-ink">
-                    {dash?.server.lastFullSyncAt
-                      ? timeAgo(dash.server.lastFullSyncAt)
-                      : flyStatus?.lastFullSyncAt
-                        ? timeAgo(flyStatus.lastFullSyncAt)
+                    {dash?.server.hasOpenSeaKey != null
+                      ? dash.server.hasOpenSeaKey
+                        ? 'yes'
+                        : 'no'
+                      : openSeaStatus.hasApiKey
+                        ? 'browser yes'
                         : '—'}
                   </span>
                 </div>
@@ -520,9 +645,18 @@ export function AdminPage() {
       {tab === 'visits' && (
         <div className="space-y-4">
           {!dash ? (
-            <EmptyIndexer hint="Visit tracking requires the Fly indexer. Users' page views, country/city (IP + locale), and devices appear here." />
+            <div className="rounded-2xl border border-edge py-12 text-center text-ink-3 text-sm">
+              Loading visit data…
+            </div>
           ) : (
             <>
+              {dataSource === 'local' && (
+                <p className="text-xs text-ink-3">
+                  Showing visits from <strong className="text-ink">this browser</strong> (timezone /
+                  locale based region). Browse a few pages, then hit Refresh stats. Real city-level
+                  IP geo needs the Fly indexer.
+                </p>
+              )}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
                 {[
                   { label: '24h visits', value: dash.visits.last24h },
@@ -653,9 +787,17 @@ export function AdminPage() {
       {tab === 'users' && (
         <div className="space-y-4">
           {!dash ? (
-            <EmptyIndexer hint="User profiles (sessions + wallets) are built from visit events on the Fly indexer." />
+            <div className="rounded-2xl border border-edge py-12 text-center text-ink-3 text-sm">
+              Loading users…
+            </div>
           ) : (
             <>
+              {dataSource === 'local' && (
+                <p className="text-xs text-ink-3">
+                  Users on this device only. Connect a wallet while browsing to appear as a wallet
+                  profile. Multi-user tracking requires Fly.
+                </p>
+              )}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                 {[
                   { label: 'Users / sessions', value: dash.users.total, icon: Users },
@@ -820,8 +962,8 @@ export function AdminPage() {
             </div>
             {!dash?.dataCollection.lastSyncs?.length ? (
               <div className="px-4 py-10 text-center text-sm text-ink-3">
-                No server sync data yet. Deploy indexer with OPENSEA_API_KEY or open collections
-                after VITE_INDEXER_URL is set.
+                No collection catalog cached yet. Open a few collections on Discover so listings are
+                indexed in this browser, then refresh.
               </div>
             ) : (
               <div className="overflow-x-auto table-scroll">
@@ -1105,15 +1247,4 @@ export function AdminPage() {
   )
 }
 
-function EmptyIndexer({ hint }: { hint: string }) {
-  return (
-    <div className="rounded-2xl border border-edge bg-surface px-6 py-16 text-center">
-      <Server className="w-8 h-8 text-ink-3 mx-auto mb-3" />
-      <p className="text-ink font-semibold">Fly indexer required</p>
-      <p className="text-sm text-ink-3 mt-2 max-w-md mx-auto leading-relaxed">{hint}</p>
-      <p className="text-xs text-ink-3 mt-3 font-mono">
-        VITE_INDEXER_URL=https://your-app.fly.dev
-      </p>
-    </div>
-  )
-}
+
