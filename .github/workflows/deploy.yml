@@ -38,6 +38,9 @@ jobs:
           VITE_CHAIN_ID: '46630'
           # Free key: https://docs.opensea.io/reference/api-keys — required for live OpenSea in the browser
           VITE_OPENSEA_API_KEY: ${{ secrets.OPENSEA_API_KEY }}
+          # Optional admin panel credentials (defaults exist in client; override via secrets)
+          VITE_ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          VITE_ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
         run: npm run build
 
       # SPA fallback for client-side routes
