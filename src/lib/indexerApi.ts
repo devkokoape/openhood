@@ -255,6 +255,8 @@ export interface ContentStatusRow {
   hasImage: boolean
   floorPrice: number
   volume24h: number
+  volumeTotal?: number
+  verified?: boolean
   items: number
   syncedAt: string | null
   contractAddress: string | null
@@ -272,6 +274,8 @@ export interface ContentStatusPayload {
   lastError?: string | null
   summary: {
     collections: number
+    verified?: number
+    verifiedMinVolumeEth?: number
     withListings: number
     empty: number
     shell: number
@@ -308,10 +312,11 @@ function adminAuthHeaders(): HeadersInit {
 
 /**
  * Trigger OpenSea → Fly bulk download (queued on server).
- * mode: all | meta = listings for all · missing = empty/stub · enrich = art fill
+ * mode: verified (default preferred) | all | missing | enrich
+ * Server always ranks verified (≥3 ETH vol) first.
  */
 export async function triggerContentDownload(
-  mode: 'all' | 'missing' | 'meta' | 'enrich' = 'all'
+  mode: 'all' | 'missing' | 'meta' | 'enrich' | 'verified' = 'verified'
 ): Promise<{
   ok?: boolean
   error?: string
@@ -324,6 +329,8 @@ export async function triggerContentDownload(
   alreadyRunning?: boolean
   metaQueued?: number
   fullQueued?: number
+  verifiedCount?: number
+  verifiedQueued?: number
 } | null> {
   const base = baseUrl()
   if (!base) return null
@@ -361,6 +368,8 @@ export async function triggerContentDownload(
       alreadyRunning?: boolean
       metaQueued?: number
       fullQueued?: number
+      verifiedCount?: number
+      verifiedQueued?: number
     }
   } catch (e) {
     return {

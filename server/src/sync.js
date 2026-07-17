@@ -31,6 +31,56 @@ import {
 } from './store.js'
 import { fetchNft } from './opensea.js'
 
+/** Same policy as client: OpenSea + lifetime volume ≥ this → verified */
+export const VERIFIED_MIN_VOLUME_ETH = Number(
+  process.env.VERIFIED_MIN_VOLUME_ETH || 3
+)
+
+/**
+ * Verified-first ordering for download/sync queues.
+ * 1) verified (volumeTotal ≥ 3 ETH), highest volume first
+ * 2) PRIORITY_SLUGS
+ * 3) rest by listedCount / volume
+ */
+export function isVerifiedCollection(c) {
+  if (!c) return false
+  const vol = Number(c.volumeTotal ?? c.volume_total ?? 0)
+  return Number.isFinite(vol) && vol >= VERIFIED_MIN_VOLUME_ETH
+}
+
+/** @returns {string[]} slugs ordered verified → priority → rest */
+export function slugsVerifiedFirst(slugs = defaultSlugs()) {
+  const set = new Set(slugs.filter(Boolean))
+  const cols = listCollections()
+  const bySlug = new Map(cols.map((c) => [c.slug, c]))
+
+  const verified = []
+  const priority = []
+  const rest = []
+
+  for (const slug of set) {
+    const c = bySlug.get(slug)
+    if (c && isVerifiedCollection(c)) verified.push(slug)
+    else if (PRIORITY_SLUGS.includes(slug)) priority.push(slug)
+    else rest.push(slug)
+  }
+
+  const vol = (slug) => {
+    const c = bySlug.get(slug)
+    return Number(c?.volumeTotal || c?.volume24h || 0)
+  }
+  const listed = (slug) => {
+    const c = bySlug.get(slug)
+    return Number(c?.listedCount || c?.nfts?.length || 0)
+  }
+
+  verified.sort((a, b) => vol(b) - vol(a) || listed(b) - listed(a))
+  priority.sort((a, b) => vol(b) - vol(a) || listed(b) - listed(a))
+  rest.sort((a, b) => vol(b) - vol(a) || listed(b) - listed(a))
+
+  return [...verified, ...priority, ...rest]
+}
+
 /** Built-in high-priority + full Robinhood snapshot when INDEX_SLUGS unset */
 export const PRIORITY_SLUGS = [
   'gremlin-cartel',
@@ -251,18 +301,18 @@ export function queueDepth() {
 
 /**
  * Admin: queue OpenSea → Fly download for many collections.
+ * Order always: **verified first** (≥3 ETH total vol) → priority → rest.
  * mode:
- *  - all / meta: discover RH + **listings-only** for every slug (fast, usable books)
- *  - enrich: full art/traits only for collections that already have listings but stubs
- *  - missing: meta for empty books + full for stub-heavy ones with listings
- *
- * Never dumps 1000+ full enrich jobs in one click — that looked "broken" (queue stuck for hours).
+ *  - all / meta: listings-only for every slug (fast books)
+ *  - verified: listings + full enrich for verified only, then listings for rest
+ *  - enrich: art/traits for stub-heavy (verified first, cap)
+ *  - missing: empty books + stub-heavy (verified first)
  */
 export async function downloadAllContent({ mode = 'all' } = {}) {
   const beforeQ = queueDepth()
 
   // If already a big backlog, don't pile on — report status instead
-  if (beforeQ > 80 && mode !== 'enrich') {
+  if (beforeQ > 80 && mode !== 'enrich' && mode !== 'verified') {
     return {
       ok: true,
       mode,
@@ -285,59 +335,93 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
     console.error('[download] discover', e?.message || e)
   }
 
-  const slugs = defaultSlugs()
+  // After discover, re-rank with latest volume stats where we have them
+  const ordered = slugsVerifiedFirst(defaultSlugs())
+  const verifiedSlugs = ordered.filter((slug) => {
+    const c = getCollection(slug)
+    return isVerifiedCollection(c)
+  })
+
   let queued = 0
   let metaQueued = 0
   let fullQueued = 0
+  let verifiedQueued = 0
 
   if (mode === 'enrich') {
-    // Art + traits for collections that already have a book but mostly stubs
+    // Art + traits — verified first, then highest listed
     const cols = listCollections()
       .map((c) => {
         const nfts = c.nfts || []
         const listed = nfts.length || c.listedCount || 0
         const stubs = nfts.filter((n) => isPlaceholderImage(n.image)).length
-        return { slug: c.slug, listed, stubs }
+        return {
+          slug: c.slug,
+          listed,
+          stubs,
+          verified: isVerifiedCollection(c),
+          vol: Number(c.volumeTotal || 0),
+        }
       })
       .filter((c) => c.listed > 0 && c.stubs > Math.max(3, c.listed * 0.15))
-      .sort((a, b) => b.listed - a.listed)
+      .sort(
+        (a, b) =>
+          Number(b.verified) - Number(a.verified) ||
+          b.vol - a.vol ||
+          b.listed - a.listed
+      )
 
-    // Cap so one click can't freeze the box for a day
     const cap = Number(process.env.ENRICH_QUEUE_CAP || 40)
     for (const c of cols.slice(0, cap)) {
-      enqueueSync(c.slug, { full: true, front: PRIORITY_SLUGS.includes(c.slug) })
+      enqueueSync(c.slug, { full: true, front: c.verified })
       fullQueued++
       queued++
+      if (c.verified) verifiedQueued++
     }
   } else if (mode === 'missing') {
-    for (const slug of slugs) {
+    for (const slug of ordered) {
       const c = getCollection(slug)
       const nfts = c?.nfts || []
+      const verified = isVerifiedCollection(c)
       if (!c || !nfts.length) {
-        enqueueSync(slug, { full: false }) // listings first
+        enqueueSync(slug, { full: false, front: verified })
         metaQueued++
         queued++
+        if (verified) verifiedQueued++
         continue
       }
       const stubs = nfts.filter((n) => isPlaceholderImage(n.image)).length
       if (stubs > Math.max(5, nfts.length * 0.35)) {
-        enqueueSync(slug, { full: true })
+        enqueueSync(slug, { full: true, front: verified })
         fullQueued++
         queued++
+        if (verified) verifiedQueued++
       }
     }
-  } else {
-    // all / meta — FAST path: listings + stats for whole chain
-    for (const slug of PRIORITY_SLUGS) {
+  } else if (mode === 'verified') {
+    // Phase 1: verified — listings + full enrich (front of queue)
+    for (const slug of verifiedSlugs) {
       enqueueSync(slug, { full: false, front: true })
+      enqueueSync(slug, { full: true, front: true })
       metaQueued++
-      queued++
+      fullQueued++
+      verifiedQueued++
+      queued += 2
     }
-    for (const slug of slugs) {
-      if (PRIORITY_SLUGS.includes(slug)) continue
+    // Phase 2: everyone else — listings only (back of queue)
+    for (const slug of ordered) {
+      if (verifiedSlugs.includes(slug)) continue
       enqueueSync(slug, { full: false })
       metaQueued++
       queued++
+    }
+  } else {
+    // all / meta — listings for whole chain, verified first at front
+    for (const slug of ordered) {
+      const verified = verifiedSlugs.includes(slug)
+      enqueueSync(slug, { full: false, front: verified })
+      metaQueued++
+      queued++
+      if (verified) verifiedQueued++
     }
   }
 
@@ -345,21 +429,26 @@ export async function downloadAllContent({ mode = 'all' } = {}) {
     lastDownloadAt: new Date().toISOString(),
     lastDownloadMode: mode,
     lastDownloadQueued: queued,
+    lastVerifiedQueued: verifiedQueued,
   })
 
   const q = queueDepth()
   let message =
     mode === 'enrich'
-      ? `Queued ${fullQueued} collections for art/traits enrich (cap applied). Queue depth ${q}.`
+      ? `Queued ${fullQueued} art/traits jobs (verified first, ${verifiedQueued} verified). Queue ${q}.`
       : mode === 'missing'
-        ? `Queued ${metaQueued} listing fills + ${fullQueued} art enriches. Queue depth ${q}.`
-        : `Queued ${metaQueued} collections for listings download (OpenSea → Fly). Art fills in background. Queue depth ${q}.`
+        ? `Queued ${metaQueued} listing + ${fullQueued} enrich jobs (verified first). Queue ${q}.`
+        : mode === 'verified'
+          ? `Verified first: ${verifiedQueued} verified collections (listings+art), then listings for the rest. Queue ${q}.`
+          : `Queued ${metaQueued} listings downloads — verified (${verifiedQueued}) first, then the rest. Queue ${q}.`
 
   return {
     ok: true,
     mode,
     discovered,
-    slugCount: slugs.length,
+    slugCount: ordered.length,
+    verifiedCount: verifiedSlugs.length,
+    verifiedQueued,
     queued,
     metaQueued,
     fullQueued,
@@ -701,21 +790,23 @@ export async function syncOnce(slugs = defaultSlugs()) {
   return getMeta()
 }
 
-/** Boot: discover all RH → meta for many → full enrich for priority */
+/** Boot: discover all RH → meta verified-first → full enrich verified/priority then rest */
 export async function warmPriority() {
   // 0) Discover every Robinhood collection from OpenSea
   try {
-    await discoverPass()
+    await discoverPass({ enqueueNew: false })
   } catch (e) {
     console.error('[warm:discover]', e?.message || e)
   }
 
-  const slugs = defaultSlugs()
-  console.log(`[warm] indexing ${slugs.length} Robinhood collection slugs`)
+  const ordered = slugsVerifiedFirst(defaultSlugs())
+  console.log(
+    `[warm] indexing ${ordered.length} RH slugs (verified-first, minVol=${VERIFIED_MIN_VOLUME_ETH} ETH)`
+  )
 
-  // Meta-only first pass (listings/floor for as many as possible)
-  const metaN = Number(process.env.WARM_META_N || slugs.length)
-  for (const slug of slugs.slice(0, metaN)) {
+  // Meta-only first pass in verified-first order
+  const metaN = Number(process.env.WARM_META_N || ordered.length)
+  for (const slug of ordered.slice(0, metaN)) {
     try {
       await syncSlugMeta(slug)
     } catch (e) {
@@ -723,18 +814,30 @@ export async function warmPriority() {
     }
     await new Promise((r) => setTimeout(r, 200))
   }
-  // Full art+traits for priority + any with listings already
-  for (const slug of PRIORITY_SLUGS) {
-    enqueueSync(slug, { full: true })
+
+  // Re-rank after meta has volume stats
+  const ranked = slugsVerifiedFirst(defaultSlugs())
+  const verified = ranked.filter((s) => isVerifiedCollection(getCollection(s)))
+
+  // Full enrich: verified first, then PRIORITY, then rest with listings
+  for (const slug of verified) {
+    enqueueSync(slug, { full: true, front: true })
   }
-  // Queue remaining discovered slugs for full enrich (serial, background)
-  for (const slug of slugs) {
-    if (PRIORITY_SLUGS.includes(slug)) continue
-    enqueueSync(slug, { full: true })
+  for (const slug of PRIORITY_SLUGS) {
+    if (verified.includes(slug)) continue
+    enqueueSync(slug, { full: true, front: true })
+  }
+  for (const slug of ranked) {
+    if (verified.includes(slug) || PRIORITY_SLUGS.includes(slug)) continue
+    const c = getCollection(slug)
+    if ((c?.nfts?.length || c?.listedCount || 0) > 0) {
+      enqueueSync(slug, { full: true })
+    }
   }
   setMeta({
     lastFullSyncAt: new Date().toISOString(),
-    slugQueue: slugs,
+    slugQueue: ranked,
+    warmVerifiedCount: verified.length,
   })
 }
 

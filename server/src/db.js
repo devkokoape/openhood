@@ -598,18 +598,26 @@ export function dbStats() {
   return { collections, nfts, enriched, listed, visits, users }
 }
 
+/** Match client/server verified policy (OpenSea + ≥3 ETH total volume) */
+const VERIFIED_MIN_VOLUME_ETH = Number(process.env.VERIFIED_MIN_VOLUME_ETH || 3)
+
 /**
  * Per-collection content health for admin panel.
  * status: ready | partial | empty | shell
+ * Ordered: verified first, then by listed count.
  */
 export function dbContentStatus() {
   const database = getDb()
   const cols = database
     .prepare(
-      `SELECT slug, name, image, floor_price, volume_24h, listed_count, items,
+      `SELECT slug, name, image, floor_price, volume_24h, volume_total, listed_count, items,
               synced_at, contract_address
        FROM collections
-       ORDER BY listed_count DESC, volume_24h DESC`
+       ORDER BY
+         CASE WHEN volume_total >= ${VERIFIED_MIN_VOLUME_ETH} THEN 0 ELSE 1 END,
+         volume_total DESC,
+         listed_count DESC,
+         volume_24h DESC`
     )
     .all()
 
@@ -655,6 +663,10 @@ export function dbContentStatus() {
     const enrichPct =
       listed > 0 ? Math.round((enriched / Math.max(listed, 1)) * 100) : 0
 
+    const volumeTotal = Number(c.volume_total || 0)
+    const verified =
+      Number.isFinite(volumeTotal) && volumeTotal >= VERIFIED_MIN_VOLUME_ETH
+
     let status = 'shell'
     if (listed === 0 && nfts === 0) {
       status = c.synced_at ? 'empty' : 'shell'
@@ -685,6 +697,8 @@ export function dbContentStatus() {
       hasImage,
       floorPrice: c.floor_price || 0,
       volume24h: c.volume_24h || 0,
+      volumeTotal,
+      verified,
       items: c.items || 0,
       syncedAt: c.synced_at || null,
       contractAddress: c.contract_address || null,
@@ -692,9 +706,13 @@ export function dbContentStatus() {
     }
   })
 
+  const verifiedCount = collections.filter((c) => c.verified).length
+
   return {
     summary: {
       collections: cols.length,
+      verified: verifiedCount,
+      verifiedMinVolumeEth: VERIFIED_MIN_VOLUME_ETH,
       withListings,
       empty: empty - shell > 0 ? empty - shell : empty,
       shell,

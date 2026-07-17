@@ -401,7 +401,7 @@ export function AdminPage() {
   }, [tab, loadContentStatus])
 
   const runDownload = useCallback(
-    async (mode: 'all' | 'missing' | 'meta' | 'enrich') => {
+    async (mode: 'all' | 'missing' | 'meta' | 'enrich' | 'verified') => {
       setDownloadBusy(true)
       setDownloadMsg(null)
       try {
@@ -612,8 +612,9 @@ export function AdminPage() {
                   Fly content status
                 </h2>
                 <p className="text-sm text-ink-2 mt-1 max-w-2xl leading-relaxed">
-                  What OpenSea data is already on the Fly server (listings, art, traits). First
-                  open of a collection is slow; after Fly stores it, everyone loads faster.
+                  OpenSea → Fly content health. Downloads always prioritize{' '}
+                  <strong className="text-ink">verified</strong> collections first (≥3 ETH
+                  lifetime volume), then the rest — so real markets are ready for users sooner.
                 </p>
                 {content?.lastDownloadAt && (
                   <p className="text-xs text-ink-3 mt-2">
@@ -641,6 +642,36 @@ export function AdminPage() {
                 </Button>
                 <Button
                   size="sm"
+                  disabled={downloadBusy}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        'Start with VERIFIED collections first (≥3 ETH volume):\n• Full listings + art for verified\n• Then listings for everyone else\n\nThis is the recommended download order.'
+                      )
+                    ) {
+                      return
+                    }
+                    void runDownload('verified')
+                  }}
+                  title="Verified collections first (≥3 ETH volume), then the rest"
+                >
+                  <CloudDownload
+                    className={clsx('w-3.5 h-3.5', downloadBusy && 'animate-pulse')}
+                  />
+                  {downloadBusy ? 'Queueing…' : 'Verified first → Fly'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={downloadBusy}
+                  onClick={() => void runDownload('enrich')}
+                  title="Fill real NFT art/traits — verified first, then others"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Enrich art
+                </Button>
+                <Button
+                  size="sm"
                   variant="outline"
                   disabled={downloadBusy}
                   onClick={() => void runDownload('missing')}
@@ -653,19 +684,10 @@ export function AdminPage() {
                   size="sm"
                   variant="outline"
                   disabled={downloadBusy}
-                  onClick={() => void runDownload('enrich')}
-                  title="Fill real NFT art/traits for collections that already have listings"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Enrich art
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={downloadBusy}
                   onClick={() => {
                     if (
                       !window.confirm(
-                        'Download listings for ALL Robinhood collections into Fly?\n\nThis is the fast path (prices/items first). Art fills with “Enrich art” or automatically in the background.\n\nSafe to leave open — works in the background.'
+                        'Queue listings for ALL collections (verified still go first in the queue)?'
                       )
                     ) {
                       return
@@ -673,10 +695,8 @@ export function AdminPage() {
                     void runDownload('all')
                   }}
                 >
-                  <CloudDownload
-                    className={clsx('w-3.5 h-3.5', downloadBusy && 'animate-pulse')}
-                  />
-                  {downloadBusy ? 'Queueing…' : 'Download listings → Fly'}
+                  <Download className="w-3.5 h-3.5" />
+                  All listings
                 </Button>
               </div>
             </div>
@@ -735,6 +755,10 @@ export function AdminPage() {
                   value: content?.summary.collections ?? '—',
                 },
                 {
+                  label: `Verified (≥${content?.summary.verifiedMinVolumeEth ?? 3}Ξ)`,
+                  value: content?.summary.verified ?? '—',
+                },
+                {
                   label: 'With listings',
                   value: content?.summary.withListings ?? '—',
                 },
@@ -745,10 +769,6 @@ export function AdminPage() {
                 {
                   label: 'Partial',
                   value: content?.summary.partial ?? '—',
-                },
-                {
-                  label: 'Empty / no list',
-                  value: content?.summary.empty ?? '—',
                 },
                 {
                   label: 'Art enrich %',
@@ -873,6 +893,7 @@ export function AdminPage() {
                     <tr className="text-left text-[10px] uppercase text-ink-3 border-b border-edge bg-surface-2">
                       <th className="px-3 py-2">Collection</th>
                       <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Tier</th>
                       <th className="px-3 py-2 text-right">Listed</th>
                       <th className="px-3 py-2 text-right">Enriched</th>
                       <th className="px-3 py-2 text-right">Stubs</th>
@@ -911,6 +932,13 @@ export function AdminPage() {
                           >
                             {c.status}
                           </Badge>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {c.verified ? (
+                            <Badge tone="green">verified</Badge>
+                          ) : (
+                            <span className="text-[10px] text-ink-3">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums font-bold text-hood">
                           {c.listedCount.toLocaleString()}
