@@ -25,7 +25,12 @@ import {
   saveToDisk,
   storageInfo,
 } from './store.js'
-import { dbContentStatus, dbListNftsPage, dbReadySlugSet } from './db.js'
+import {
+  dbContentStatus,
+  dbListNftsPage,
+  dbListPublicCollections,
+  dbReadySlugSet,
+} from './db.js'
 import {
   defaultSlugs,
   discoverPass,
@@ -247,25 +252,13 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && pathname === '/v1/collections') {
       // Cap payload size for mobile clients (default 80; max 200)
+      // Thin SQL path — never load full NFT books into memory for Discover.
       const limit = Math.min(
         200,
         Math.max(1, Number(url.searchParams.get('limit') || 80))
       )
-      // Public marketplace: only fully downloaded (ready) collections.
-      // Admin content-status still lists everything.
-      const ready = dbReadySlugSet()
-      let rows = listCollections()
-        .map(summarize)
-        .filter((r) => ready.has(r.slug))
-      // Prefer markets with volume / listings first
-      rows = [...rows].sort(
-        (a, b) =>
-          (b.volume24h || 0) - (a.volume24h || 0) ||
-          (b.volumeTotal || 0) - (a.volumeTotal || 0) ||
-          (b.listedCount || 0) - (a.listedCount || 0)
-      )
-      const total = rows.length
-      rows = rows.slice(0, limit)
+      const { collections: rows, total, readyOnly, fallback } =
+        dbListPublicCollections({ readyOnly: true, limit })
       return json(
         res,
         200,
@@ -273,27 +266,35 @@ const server = http.createServer(async (req, res) => {
           collections: rows,
           count: rows.length,
           total,
-          readyOnly: true,
+          readyOnly,
+          fallback: Boolean(fallback),
         },
         12
       )
     }
 
-    // GET /v1/home — OpenSea/MagicEden-style thin home feed (one request)
-    // Only fully downloaded (ready) collections — incomplete stay hidden until 100%.
+    // GET /v1/home — thin home feed (collection shells only, no NFT books)
     if (req.method === 'GET' && pathname === '/v1/home') {
       const limit = Math.min(
         60,
         Math.max(8, Number(url.searchParams.get('limit') || 36))
       )
       const VERIFIED_MIN = Number(process.env.VERIFIED_MIN_VOLUME_ETH || 3)
-      const ready = dbReadySlugSet()
-      let rows = listCollections()
-        .map(summarize)
-        .filter((r) => ready.has(r.slug))
-      rows = [...rows].sort((a, b) => {
-        const av = (a.volumeTotal || 0) >= VERIFIED_MIN ? 1 : 0
-        const bv = (b.volumeTotal || 0) >= VERIFIED_MIN ? 1 : 0
+      const {
+        collections: rows,
+        readyOnly,
+        fallback,
+      } = dbListPublicCollections({ readyOnly: true, limit })
+      const top = rows.map((r) => ({
+        ...r,
+        chain: r.chain || 'robinhood',
+        verified: (r.volumeTotal || 0) >= VERIFIED_MIN,
+        ready: true,
+      }))
+      // Prefer verified first for home ranking
+      top.sort((a, b) => {
+        const av = a.verified ? 1 : 0
+        const bv = b.verified ? 1 : 0
         if (bv !== av) return bv - av
         return (
           (b.volume24h || 0) - (a.volume24h || 0) ||
@@ -301,44 +302,22 @@ const server = http.createServer(async (req, res) => {
           (b.listedCount || 0) - (a.listedCount || 0)
         )
       })
-      const top = rows.slice(0, limit).map((r) => ({
-        slug: r.slug,
-        collectionId: r.collectionId,
-        name: r.name,
-        image: r.image,
-        banner: r.banner,
-        floorPrice: r.floorPrice,
-        volume24h: r.volume24h,
-        volumeTotal: r.volumeTotal,
-        owners: r.owners,
-        items: r.items,
-        listedCount: r.listedCount,
-        listedPct: r.listedPct,
-        contractAddress: r.contractAddress,
-        chain: r.chain || 'robinhood',
-        verified: (r.volumeTotal || 0) >= VERIFIED_MIN,
-        ready: true,
-      }))
       const stats = {
-        collections: rows.length,
-        ready: rows.length,
-        listedTotal: rows.reduce((s, r) => s + (r.listedCount || 0), 0),
-        volume24h: rows.reduce((s, r) => s + (r.volume24h || 0), 0),
-        verified: rows.filter((r) => (r.volumeTotal || 0) >= VERIFIED_MIN)
-          .length,
+        collections: top.length,
+        ready: top.length,
+        listedTotal: top.reduce((s, r) => s + (r.listedCount || 0), 0),
+        volume24h: top.reduce((s, r) => s + (r.volume24h || 0), 0),
+        verified: top.filter((r) => r.verified).length,
       }
-      // Light activity sample from top collection if present
-      let activity = []
-      const first = getCollection(top[0]?.slug)
-      if (first?.activities?.length) {
-        activity = first.activities.slice(0, 12)
-      }
+      // Skip heavy activity sample on home (keeps Discover fast under large DBs)
+      const activity = []
       return json(
         res,
         200,
         {
           generatedAt: new Date().toISOString(),
-          readyOnly: true,
+          readyOnly,
+          fallback: Boolean(fallback),
           stats,
           collections: top,
           activity,

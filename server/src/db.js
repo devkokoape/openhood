@@ -851,34 +851,93 @@ export function dbReadySlugSet({ force = false } = {}) {
       set.add(a.slug)
     }
   }
-  // Also include collection shells that report listings but nft agg missed
-  // (meta-only rows still useful on Discover)
-  try {
-    const shells = getDb()
-      .prepare(
-        `SELECT slug, listed_count FROM collections
-         WHERE listed_count > 0 AND (image IS NOT NULL AND image != '' AND image NOT LIKE '%dicebear%')`
-      )
-      .all()
-    for (const s of shells) {
-      if (!set.has(s.slug) && Number(s.listed_count) > 0) {
-        // Only add if we have some NFT rows already (avoid empty ghosts)
-        const has = nftAgg.find((x) => x.slug === s.slug)
-        if (has && has.listed > 0) {
-          // already considered
-        } else if (has && has.listed === 0) {
-          /* skip */
-        } else if (!has && Number(s.listed_count) >= 5) {
-          // Fall through: allow high-signal shells from collections table
-          // when nfts table lagging — still need listed in nfts for pages
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
   readySlugCache = { at: now, set }
   return set
+}
+
+/**
+ * Thin public catalog rows — collections table only (never load NFT books).
+ * Used by /v1/home and /v1/collections so Discover stays fast.
+ *
+ * Prefer ready slugs when the cache is warm; otherwise show all listed
+ * Robinhood shells so the marketplace never goes empty on a cold start.
+ */
+export function dbListPublicCollections({ readyOnly = true, limit = 80 } = {}) {
+  const lim = Math.min(300, Math.max(1, Number(limit) || 80))
+  const mapRow = (r) => ({
+    slug: r.slug,
+    collectionId: r.collection_id || `os-${r.slug}`,
+    name: r.name || r.slug,
+    image: r.image || '',
+    banner: r.banner || r.image || '',
+    description: r.description || '',
+    contractAddress: r.contract_address || null,
+    chain: r.chain || 'robinhood',
+    floorPrice: r.floor_price || 0,
+    volume24h: r.volume_24h || 0,
+    volumeTotal: r.volume_total || 0,
+    owners: r.owners || 0,
+    items: r.items || 0,
+    listedCount: r.listed_count || 0,
+    listedPct: r.listed_pct || 0,
+    source: r.source || 'opensea',
+    syncedAt: r.synced_at || null,
+  })
+
+  const rows = getDb()
+    .prepare(
+      `SELECT slug, collection_id, name, image, banner, description,
+              contract_address, chain, floor_price, volume_24h, volume_total,
+              owners, items, listed_count, listed_pct, source, synced_at
+       FROM collections
+       WHERE listed_count > 0
+         AND (chain IS NULL OR chain = '' OR lower(chain) = 'robinhood')
+       ORDER BY volume_total DESC, volume_24h DESC, listed_count DESC
+       LIMIT 500`
+    )
+    .all()
+
+  // Use ready set only if already cached — never block home on cold GROUP BY
+  let ready = null
+  let usedReady = false
+  if (readyOnly && readySlugCache.set && Date.now() - readySlugCache.at < READY_SLUG_TTL_MS) {
+    ready = readySlugCache.set
+    usedReady = true
+  } else if (readyOnly) {
+    // Warm ready cache in background; serve listed shells immediately
+    setImmediate(() => {
+      try {
+        dbReadySlugSet({ force: true })
+      } catch (e) {
+        console.warn('[ready] background warm failed', e?.message || e)
+      }
+    })
+  }
+
+  const out = []
+  for (const r of rows) {
+    if (ready && !ready.has(r.slug)) continue
+    out.push(mapRow(r))
+    if (out.length >= lim) break
+  }
+
+  if (out.length >= 3) {
+    return {
+      collections: out,
+      total: out.length,
+      readyOnly: usedReady,
+      fallback: !usedReady,
+    }
+  }
+
+  // Cold start / empty ready: show top listed RH markets so Discover works
+  const fallback = rows.slice(0, lim).map(mapRow)
+  return {
+    collections: fallback,
+    total: fallback.length,
+    readyOnly: false,
+    fallback: true,
+  }
 }
 
 /** Invalidate ready cache after sync/enrich (optional callers) */
