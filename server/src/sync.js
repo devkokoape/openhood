@@ -1060,22 +1060,18 @@ export async function enrichPass() {
   if (enrichBusy || busy || queueRunning) return
   enrichBusy = true
   try {
-    // Prefer collections with most stubs first so non-Gremlin catch up
-    const cols = [...listCollections()].sort((a, b) => {
-      const am = (a.nfts || []).filter(
-        (n) => isPlaceholderImage(n.image) || !hasRealTraits(n.traits)
-      ).length
-      const bm = (b.nfts || []).filter(
-        (n) => isPlaceholderImage(n.image) || !hasRealTraits(n.traits)
-      ).length
-      return bm - am
-    })
-    for (const c of cols) {
+    // Rank by listed_count shells only — never load every book into RAM
+    const cols = [...listCollections()]
+      .filter((c) => (c.listedCount || 0) > 0)
+      .sort((a, b) => (b.listedCount || 0) - (a.listedCount || 0))
+      .slice(0, 12) // one pass: few collections so HTTP isn't starved
+    for (const shell of cols) {
       const missing = unenrichedTokens(
-        c.slug,
-        Number(process.env.ENRICH_BATCH || 120)
+        shell.slug,
+        Number(process.env.ENRICH_BATCH || 40)
       )
       if (!missing.length) continue
+      const c = getCollection(shell.slug) || shell
       const contract = c.contractAddress
       if (!contract) continue
       console.log(`[enrich] ${c.slug}: ${missing.length} need art/traits`)
@@ -1086,7 +1082,7 @@ export async function enrichPass() {
           c.slug,
           c.nfts || [],
           c.collectionId || `os-${c.slug}`,
-          { maxPages: 40 }
+          { maxPages: 12 }
         )
         if (filled?.length) {
           putCollection(c.slug, {

@@ -785,24 +785,26 @@ async function main() {
     console.log(`[openhood-indexer] media cache on volume · ${JSON.stringify(mediaStats())}`)
   })
 
-  // Phase 1: discover + meta (deferred so HTTP stays up after deploy)
+  // Background indexing — delayed and staggered so public HTTP stays fast
+  const warmDelay = Number(process.env.WARM_DELAY_MS || 60_000)
   setTimeout(() => {
     void warmPriority().catch((e) => console.error('[warm]', e))
-  }, 15_000)
+  }, warmDelay)
 
   // Re-discover RH collections periodically (new drops appear automatically)
   setInterval(() => {
     void discoverPass().catch((e) => console.error('[discover-loop]', e))
   }, Number(process.env.DISCOVER_INTERVAL_MS || 15 * 60_000))
 
+  // Queue-based sync (1–few jobs per tick — does not block /v1/home)
   setInterval(() => {
     void syncOnce().catch((e) => console.error('[loop]', e))
-  }, SYNC_INTERVAL_MS)
+  }, Math.max(SYNC_INTERVAL_MS, 45_000))
 
   // Phase 2: fill remaining metadata stubs (all collections)
   setInterval(() => {
     void enrichPass().catch((e) => console.error('[enrich]', e))
-  }, Number(process.env.ENRICH_INTERVAL_MS || 15_000))
+  }, Number(process.env.ENRICH_INTERVAL_MS || 45_000))
 
   // Phase 3: download token art onto Fly disk for fast serving
   setInterval(() => {
