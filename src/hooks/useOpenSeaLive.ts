@@ -178,14 +178,12 @@ export function useOpenSeaLive() {
   const discoverBusy = useRef(false)
 
   const catalog = useMemo(() => {
-    // Fly is source of truth — only ready collections from the indexer.
-    // Never merge seed stubs (incomplete / not fully downloaded).
-    if (hasIndexerUrl()) {
+    // Prefer Fly ready catalog when we have it; otherwise seed/OS discovery
+    // so Discover never falls back to only demo/testnet collections.
+    if (indexerCols.length > 0) {
       return capCollections(indexerCols, maxDiscoverCollections())
     }
-    // Offline / no indexer: fall back to local seed + discovery
     let list = mergeBySlug(seed, discovered)
-    list = mergeBySlug(list, indexerCols)
     return capCollections(list, maxDiscoverCollections())
   }, [seed, discovered, indexerCols])
 
@@ -201,28 +199,18 @@ export function useOpenSeaLive() {
     try {
       const max = maxDiscoverCollections()
       const lite = preferLiteMode()
+      let gotFly = false
 
-      // Fly ready-only feed (server filters incomplete downloads)
+      // Fly ready feed first (Robinhood mainnet markets)
       if (hasIndexerUrl()) {
-        const { fetchHomeFeed } = await import('../lib/indexerApi')
-        const home = await fetchHomeFeed(max)
-        if (home) {
-          const cols = (home.collections || []).map(indexerRowToCollection)
-          setIndexerCols(cols)
-          setDiscovered([]) // drop any non-ready OS discovery
-          setStatus((s) => ({
-            ...s,
-            discovered: cols.length,
-            live: true,
-            lastOkAt: Date.now(),
-            lastError: null,
-          }))
-        } else {
-          const rows = await fetchIndexerCollections({ limit: max })
-          if (rows) {
-            const cols = rows.map(indexerRowToCollection)
+        try {
+          const { fetchHomeFeed } = await import('../lib/indexerApi')
+          const home = await fetchHomeFeed(max)
+          if (home?.collections?.length) {
+            const cols = home.collections.map(indexerRowToCollection)
             setIndexerCols(cols)
             setDiscovered([])
+            gotFly = true
             setStatus((s) => ({
               ...s,
               discovered: cols.length,
@@ -230,24 +218,69 @@ export function useOpenSeaLive() {
               lastOkAt: Date.now(),
               lastError: null,
             }))
+          } else {
+            const rows = await fetchIndexerCollections({ limit: max })
+            if (rows?.length) {
+              const cols = rows.map(indexerRowToCollection)
+              setIndexerCols(cols)
+              setDiscovered([])
+              gotFly = true
+              setStatus((s) => ({
+                ...s,
+                discovered: cols.length,
+                live: true,
+                lastOkAt: Date.now(),
+                lastError: null,
+              }))
+            }
           }
-        }
-      } else if (!lite) {
-        // Fallback only without Fly
-        const rows = await fetchAllRobinhoodCollections({
-          maxPages: 1,
-          pageSize: Math.min(50, max),
-        })
-        if (rows.length) {
-          const mapped = rows
-            .slice(0, max)
-            .map((c) => collectionFromOpenSeaListItem(c))
-          setDiscovered(mapped)
+        } catch (e) {
           setStatus((s) => ({
             ...s,
-            discovered: mapped.length,
-            live: true,
-            lastOkAt: Date.now(),
+            lastError:
+              e instanceof Error ? e.message : 'Indexer unavailable',
+          }))
+        }
+      }
+
+      // Fallback: local RH snapshot + optional OpenSea discovery
+      // (keeps marketplace useful when Fly is down / empty)
+      if (!gotFly) {
+        setIndexerCols([])
+        if (!lite) {
+          try {
+            const rows = await fetchAllRobinhoodCollections({
+              maxPages: 1,
+              pageSize: Math.min(50, max),
+            })
+            if (rows.length) {
+              const mapped = rows
+                .slice(0, max)
+                .map((c) => collectionFromOpenSeaListItem(c))
+              setDiscovered(mapped)
+              setStatus((s) => ({
+                ...s,
+                discovered: mapped.length,
+                live: true,
+                lastOkAt: Date.now(),
+              }))
+            }
+          } catch {
+            // seed snapshot still fills catalog via useMemo
+            setStatus((s) => ({
+              ...s,
+              discovered: seed.length,
+              live: seed.length > 0,
+              lastOkAt: seed.length ? Date.now() : s.lastOkAt,
+            }))
+          }
+        } else {
+          // Mobile / lite: seed snapshot is enough offline
+          setStatus((s) => ({
+            ...s,
+            discovered: seed.length,
+            live: seed.length > 0,
+            lastOkAt: seed.length ? Date.now() : s.lastOkAt,
           }))
         }
       }
@@ -260,7 +293,7 @@ export function useOpenSeaLive() {
     } finally {
       discoverBusy.current = false
     }
-  }, [])
+  }, [seed.length])
 
   const collectionsRef = useRef(collections)
   collectionsRef.current = collections

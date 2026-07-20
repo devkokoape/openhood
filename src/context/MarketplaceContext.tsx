@@ -132,16 +132,18 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const user = actor && address ? formatAddress(address) : ''
 
   /**
-   * Public catalog: Fly ready-only OpenSea markets + optional local demo/on-chain.
-   * Incomplete downloads never appear in openSeaCollections (server filters them).
+   * Public catalog: Robinhood OpenSea markets first; demo/testnet last.
+   * openSeaCollections comes from Fly (ready) or snapshot/OS fallback.
    */
   const baseCollections = useMemo(() => {
     void tick
     const liveOs = openSeaCollections
-    // Keep non-OpenSea demos (Degen, testnet) but never re-inject seed OS stubs
+    // Demo / testnet only — never pretend they are RH mainnet markets
     const demoLocal = seedCollections.filter((c) => c.source !== 'opensea')
 
-    let list: Collection[] = [...liveOs, ...demoLocal]
+    // Prefer real RH markets; demos trail so Discover isn't "only testnet"
+    let list: Collection[] =
+      liveOs.length > 0 ? [...liveOs, ...demoLocal] : [...demoLocal]
 
     if (chainEnabled && isMarketplaceDeployed()) {
       const liveChain: Collection = withRisk({
@@ -153,7 +155,11 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         intervals: chainVolume.intervals,
         source: 'demo',
       })
-      list = [liveChain, ...list.filter((c) => c.id !== ONCHAIN_COLLECTION_ID)]
+      // Keep on-chain demo after OS markets
+      list = [
+        ...list.filter((c) => c.id !== ONCHAIN_COLLECTION_ID),
+        liveChain,
+      ]
     }
 
     return list

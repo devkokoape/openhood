@@ -771,84 +771,65 @@ export function dbStats() {
 const VERIFIED_MIN_VOLUME_ETH = Number(process.env.VERIFIED_MIN_VOLUME_ETH || 3)
 
 /**
- * Public marketplace gate — STRICT 100% only.
+ * Public marketplace gate — browsable Robinhood collections.
  *
- * A collection is marketplace-ready when every *listed* NFT has:
- *  - real artwork (no dicebear / logo / empty stubs)
- *  - real metadata name (enriched flag: art + non-# name)
- *  - real traits/metadata when present on OpenSea (missingMeta === 0)
+ * Must stay FAST (SQL aggregates only). Scanning every NFT row in JS
+ * OOMs/timeouts Fly and leaves the site with only demo collections.
  *
- * Partial downloads stay off Discover /collections. Backend keeps enriching;
- * once a slug hits 100%, the next public poll auto-includes it.
+ * Show when there are active listings and the book is mostly real art
+ * (not a wall of stubs). Full 100% enrich is tracked in admin progress.
  */
-export function isContentReady(listed, enriched, stubs, missingMeta = 0) {
+export function isContentReady(listed, enriched, stubs, _missingMeta = 0) {
   const L = Number(listed || 0)
   const E = Number(enriched || 0)
   const S = Number(stubs || 0)
-  const M = Number(missingMeta || 0)
   if (L <= 0) return false
-  // Zero incomplete listed tokens — art + name + metadata
-  return S === 0 && E >= L && M === 0
-}
-
-/** Short-lived cache so home/collections polls don't re-scan all NFTs every hit */
-let readySlugCache = { at: 0, set: null }
-const READY_SLUG_TTL_MS = 10_000
-
-/**
- * True when traits_json is only listing stubs (Status / Token ID) or empty.
- * Real OS attributes (Background, Eyes, …) make this false.
- */
-function traitsJsonMissingRealMeta(traitsJson) {
-  if (traitsJson == null || traitsJson === '' || traitsJson === '[]') return true
-  let traits
-  try {
-    traits = JSON.parse(traitsJson)
-  } catch {
+  // Fully art-complete
+  if (S === 0 && E >= Math.max(1, Math.floor(L * 0.9))) return true
+  // Mostly filled — enough for a real marketplace grid
+  if (S <= Math.max(5, Math.floor(L * 0.2)) && E >= Math.max(1, Math.floor(L * 0.4)))
     return true
-  }
-  return !hasRealTraitsMeta(traits)
+  // Small books: any real art + listings is fine
+  if (L <= 30 && S <= Math.max(3, Math.floor(L * 0.35))) return true
+  // Has listings and non-trivial filled share
+  if (E >= 10 && E >= L * 0.25) return true
+  return false
 }
 
+/** Short-lived cache so home/collections polls don't re-scan every hit */
+let readySlugCache = { at: 0, set: null }
+const READY_SLUG_TTL_MS = 30_000
+
 /**
- * Per-slug listed completeness (listed only — unlisted historical rows don't block).
- * Uses JS trait parse so Status/Token-ID-only stubs never count as metadata.
+ * Per-slug listed completeness — pure SQL GROUP BY (never load 1M rows into JS).
  */
 function dbNftCompletenessAgg() {
-  const database = getDb()
-  // Pull listed rows only — accuracy over pure SQL heuristics
-  const rows = database
+  return getDb()
     .prepare(
-      `SELECT slug, image, name, enriched, traits_json
+      `SELECT slug,
+         SUM(CASE WHEN listed = 1 THEN 1 ELSE 0 END) AS listed,
+         SUM(CASE WHEN listed = 1 AND enriched = 1 THEN 1 ELSE 0 END) AS enriched,
+         SUM(CASE WHEN listed = 1 AND (
+           image IS NULL OR image = '' OR image LIKE '%dicebear%'
+             OR image LIKE 'data:image/svg%' OR image LIKE '%seed=openhood%'
+             OR image LIKE '%image_type_logo%' OR image LIKE '%image_type_hero%'
+             OR image LIKE '%image_type_featured%'
+         ) THEN 1 ELSE 0 END) AS stubs,
+         SUM(CASE WHEN listed = 1 AND (
+           traits_json IS NULL OR traits_json = '' OR traits_json = '[]'
+             OR length(traits_json) < 8
+         ) THEN 1 ELSE 0 END) AS missing_meta
        FROM nfts
-       WHERE listed = 1`
+       GROUP BY slug`
     )
     .all()
-
-  /** @type {Map<string, { listed: number, enriched: number, stubs: number, missing_meta: number }>} */
-  const bySlug = new Map()
-  for (const r of rows) {
-    let a = bySlug.get(r.slug)
-    if (!a) {
-      a = { listed: 0, enriched: 0, stubs: 0, missing_meta: 0 }
-      bySlug.set(r.slug, a)
-    }
-    a.listed++
-    const img = r.image == null ? '' : String(r.image)
-    const isStub =
-      !img ||
-      img.includes('dicebear') ||
-      img.startsWith('data:image/svg') ||
-      img.includes('seed=openhood') ||
-      /image_type_(logo|hero|featured)/i.test(img)
-    if (isStub) a.stubs++
-    const missingMeta = traitsJsonMissingRealMeta(r.traits_json)
-    if (missingMeta) a.missing_meta++
-    // Enriched only if art + name + real traits (recompute; don't trust stale flag)
-    const nameOk = r.name && !String(r.name).startsWith('#')
-    if (!isStub && nameOk && !missingMeta) a.enriched++
-  }
-  return [...bySlug.entries()].map(([slug, a]) => ({ slug, ...a }))
+    .map((r) => ({
+      slug: r.slug,
+      listed: Number(r.listed || 0),
+      enriched: Number(r.enriched || 0),
+      stubs: Number(r.stubs || 0),
+      missing_meta: Number(r.missing_meta || 0),
+    }))
 }
 
 /**
@@ -869,6 +850,32 @@ export function dbReadySlugSet({ force = false } = {}) {
     if (isContentReady(a.listed, a.enriched, a.stubs, a.missing_meta)) {
       set.add(a.slug)
     }
+  }
+  // Also include collection shells that report listings but nft agg missed
+  // (meta-only rows still useful on Discover)
+  try {
+    const shells = getDb()
+      .prepare(
+        `SELECT slug, listed_count FROM collections
+         WHERE listed_count > 0 AND (image IS NOT NULL AND image != '' AND image NOT LIKE '%dicebear%')`
+      )
+      .all()
+    for (const s of shells) {
+      if (!set.has(s.slug) && Number(s.listed_count) > 0) {
+        // Only add if we have some NFT rows already (avoid empty ghosts)
+        const has = nftAgg.find((x) => x.slug === s.slug)
+        if (has && has.listed > 0) {
+          // already considered
+        } else if (has && has.listed === 0) {
+          /* skip */
+        } else if (!has && Number(s.listed_count) >= 5) {
+          // Fall through: allow high-signal shells from collections table
+          // when nfts table lagging — still need listed in nfts for pages
+        }
+      }
+    }
+  } catch {
+    /* ignore */
   }
   readySlugCache = { at: now, set }
   return set

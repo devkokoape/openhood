@@ -68,18 +68,23 @@ export function indexerUrl(): string {
   return baseUrl()
 }
 
-async function getJson<T>(path: string): Promise<T | null> {
+async function getJson<T>(path: string, timeoutMs = 18_000): Promise<T | null> {
   const base = baseUrl()
   if (!base) return null
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
     const res = await fetch(`${base}${path.startsWith('/') ? path : `/${path}`}`, {
       headers: { accept: 'application/json' },
       cache: 'no-store',
+      signal: ctrl.signal,
     })
     if (!res.ok) return null
     return (await res.json()) as T
   } catch {
     return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
