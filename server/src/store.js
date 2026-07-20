@@ -36,13 +36,13 @@ export function loadFromDisk() {
   if (!metaGet('startedAt')) metaSet('startedAt', startedAt)
   else startedAt = metaGet('startedAt', startedAt)
 
-  // Warm cache
-  for (const c of dbListCollections({ withNfts: true })) {
+  // Warm collection shells only — never load every NFT book into RAM (1M+ rows OOMs Fly)
+  for (const c of dbListCollections({ withNfts: false })) {
     collectionCache.set(c.slug, c)
   }
   const s = dbStats()
   console.log(
-    `[store] sqlite ready ${getDbPath()} · collections=${s.collections} nfts=${s.nfts} enriched=${s.enriched}`
+    `[store] sqlite ready ${getDbPath()} · collections=${s.collections} nfts=${s.nfts} enriched=${s.enriched} (shells cached, NFTs on demand)`
   )
 }
 
@@ -192,20 +192,30 @@ export function patchCollectionNfts(slug, patchesByToken) {
 }
 
 export function getCollection(slug) {
-  if (collectionCache.has(slug)) return collectionCache.get(slug)
-  const row = dbGetCollection(slug, { includeNfts: true })
-  if (row) collectionCache.set(slug, row)
-  return row
+  // Always load listed NFTs for a single slug from SQLite (on demand).
+  // Do not trust cache.nfts — shells are cached without books.
+  const row = dbGetCollection(slug, { includeNfts: true, listedOnly: true })
+  if (row) {
+    const shell = collectionCache.get(slug)
+    collectionCache.set(slug, {
+      ...(shell || {}),
+      ...row,
+      // Keep shell meta if richer
+      name: row.name || shell?.name,
+      image: row.image || shell?.image,
+    })
+  }
+  return row || collectionCache.get(slug) || null
 }
 
 export function listCollections() {
-  // Prefer cache if warm
+  // Shells only — never materialize all NFT books at once
   if (collectionCache.size) {
-    return [...collectionCache.values()].sort(
-      (a, b) => (b.volume24h || 0) - (a.volume24h || 0)
-    )
+    return [...collectionCache.values()]
+      .map((c) => ({ ...c, nfts: c.nfts?.length ? undefined : [] }))
+      .sort((a, b) => (b.volume24h || 0) - (a.volume24h || 0))
   }
-  const list = dbListCollections({ withNfts: true })
+  const list = dbListCollections({ withNfts: false })
   for (const c of list) collectionCache.set(c.slug, c)
   return list
 }

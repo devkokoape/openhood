@@ -785,10 +785,10 @@ async function main() {
     console.log(`[openhood-indexer] media cache on volume · ${JSON.stringify(mediaStats())}`)
   })
 
-  // Phase 1: discover ALL Robinhood collections + meta pre-index
+  // Phase 1: discover + meta (deferred so HTTP stays up after deploy)
   setTimeout(() => {
     void warmPriority().catch((e) => console.error('[warm]', e))
-  }, 500)
+  }, 15_000)
 
   // Re-discover RH collections periodically (new drops appear automatically)
   setInterval(() => {
