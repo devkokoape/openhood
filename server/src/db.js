@@ -897,44 +897,12 @@ export function dbListPublicCollections({ readyOnly = true, limit = 80 } = {}) {
     )
     .all()
 
-  // Use ready set only if already cached — never block home on cold GROUP BY
-  let ready = null
-  let usedReady = false
-  if (readyOnly && readySlugCache.set && Date.now() - readySlugCache.at < READY_SLUG_TTL_MS) {
-    ready = readySlugCache.set
-    usedReady = true
-  } else if (readyOnly) {
-    // Warm ready cache in background; serve listed shells immediately
-    setImmediate(() => {
-      try {
-        dbReadySlugSet({ force: true })
-      } catch (e) {
-        console.warn('[ready] background warm failed', e?.message || e)
-      }
-    })
-  }
-
-  const out = []
-  for (const r of rows) {
-    if (ready && !ready.has(r.slug)) continue
-    out.push(mapRow(r))
-    if (out.length >= lim) break
-  }
-
-  if (out.length >= 3) {
-    return {
-      collections: out,
-      total: out.length,
-      readyOnly: usedReady,
-      fallback: !usedReady,
-    }
-  }
-
-  // Cold start / empty ready: show top listed RH markets so Discover works
-  const fallback = rows.slice(0, lim).map(mapRow)
+  // Public Discover: listed RH collection shells (collections table only).
+  // Do NOT run NFT GROUP BY here — it locks SQLite on large DBs and freezes HTTP.
+  const out = rows.slice(0, lim).map(mapRow)
   return {
-    collections: fallback,
-    total: fallback.length,
+    collections: out,
+    total: out.length,
     readyOnly: false,
     fallback: true,
   }
