@@ -200,14 +200,19 @@ export async function fetchCollection(slug) {
  * Discover OpenSea collections on Robinhood MAINNET only (chain=robinhood).
  * Never pulls testnet. Returns lightweight rows for indexer seed.
  */
+/**
+ * Discover OpenSea collections on Robinhood MAINNET.
+ * Pulls several sort orders so NEW / hyped launches appear even before
+ * they have 7d volume (created_date + one_day_volume + seven_day_volume).
+ */
 export async function fetchAllRobinhoodCollections({
   maxPages = 30,
   pageSize = 100,
   chain = 'robinhood',
+  orderBy = 'seven_day_volume',
 } = {}) {
   const out = []
   const seen = new Set()
-  let next = undefined
   // Force mainnet OpenSea chain id
   const chainId = chain === 'robinhood' || !chain ? 'robinhood' : chain
   if (/testnet|sepolia|46630/i.test(chainId)) {
@@ -215,38 +220,62 @@ export async function fetchAllRobinhoodCollections({
     return []
   }
 
-  for (let page = 0; page < maxPages; page++) {
-    let path = `/collections?chain=${encodeURIComponent(chainId)}&limit=${pageSize}&order_by=seven_day_volume`
-    if (next) path += `&next=${encodeURIComponent(next)}`
-    const data = await openSeaGet(path)
-    const rows = data?.collections || []
-    if (!rows.length) break
-    for (const c of rows) {
-      const slug = c.collection || c.slug
-      if (!slug || seen.has(slug)) continue
-      const contractChain = String(c.contracts?.[0]?.chain || chainId).toLowerCase()
-      if (/testnet|sepolia|46630/.test(contractChain)) continue
-      // Only accept robinhood mainnet contracts
-      if (contractChain && contractChain !== 'robinhood') continue
-      seen.add(slug)
-      out.push({
-        slug,
-        name: c.name || slug,
-        image: c.image_url || '',
-        banner: c.banner_image_url || c.image_url || '',
-        description: c.description || '',
-        contractAddress: c.contracts?.[0]?.address || null,
-        chain: 'robinhood',
-        items: c.total_supply || c.unique_item_count || 0,
-        owner: c.owner || null,
-        openseaUrl: c.opensea_url || `https://opensea.io/collection/${slug}`,
-      })
+  const orders = Array.isArray(orderBy)
+    ? orderBy
+    : [orderBy || 'seven_day_volume']
+
+  for (const order of orders) {
+    let next = undefined
+    const pages =
+      order === 'created_date' || order === 'one_day_volume'
+        ? Math.min(maxPages, 12)
+        : maxPages
+    for (let page = 0; page < pages; page++) {
+      let path = `/collections?chain=${encodeURIComponent(chainId)}&limit=${pageSize}&order_by=${encodeURIComponent(order)}`
+      if (next) path += `&next=${encodeURIComponent(next)}`
+      let data
+      try {
+        data = await openSeaGet(path)
+      } catch (e) {
+        console.warn(`[discover] ${order} page ${page}`, e?.message || e)
+        break
+      }
+      const rows = data?.collections || []
+      if (!rows.length) break
+      for (const c of rows) {
+        const slug = c.collection || c.slug
+        if (!slug || seen.has(slug)) continue
+        const contractChain = String(
+          c.contracts?.[0]?.chain || chainId
+        ).toLowerCase()
+        if (/testnet|sepolia|46630/.test(contractChain)) continue
+        // Only accept robinhood mainnet contracts
+        if (contractChain && contractChain !== 'robinhood') continue
+        seen.add(slug)
+        out.push({
+          slug,
+          name: c.name || slug,
+          image: c.image_url || '',
+          banner: c.banner_image_url || c.image_url || '',
+          description: c.description || '',
+          contractAddress: c.contracts?.[0]?.address || null,
+          chain: 'robinhood',
+          items: c.total_supply || c.unique_item_count || 0,
+          owner: c.owner || null,
+          openseaUrl: c.opensea_url || `https://opensea.io/collection/${slug}`,
+          // Prefer ranking signal from order used
+          _discoverOrder: order,
+          _createdDate: c.created_date || null,
+        })
+      }
+      next = data?.next
+      if (!next) break
+      await sleep(120)
     }
-    next = data?.next
-    if (!next) break
-    await sleep(150)
   }
-  console.log(`[discover] robinhood MAINNET collections: ${out.length}`)
+  console.log(
+    `[discover] robinhood MAINNET collections: ${out.length} (orders=${orders.join(',')})`
+  )
   return out
 }
 

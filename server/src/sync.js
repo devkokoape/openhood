@@ -25,7 +25,9 @@ import {
   getCollection,
   getMeta,
   listCollections,
+  patchCollectionMeta,
   patchCollectionNfts,
+  peekCollection,
   putCollection,
   setMeta,
   unenrichedTokens,
@@ -237,11 +239,17 @@ export function defaultSlugs() {
 
 /**
  * Discover every Robinhood collection on OpenSea and optionally queue meta sync.
+ * Uses multiple OpenSea sort orders so NEW / hyped launches show up (not only 7d volume leaders).
  * @param {{ enqueueNew?: boolean }} opts enqueueNew=false seeds shells only (no queue flood)
  */
 export async function discoverPass({ enqueueNew = true } = {}) {
   try {
-    const rows = await fetchAllRobinhoodCollections({ maxPages: 40, pageSize: 100 })
+    // created_date + 1d volume catch launches; 7d volume catches established books
+    const rows = await fetchAllRobinhoodCollections({
+      maxPages: 40,
+      pageSize: 100,
+      orderBy: ['one_day_volume', 'created_date', 'seven_day_volume'],
+    })
     if (!rows.length) {
       console.warn('[discover] empty — keep previous slug list')
       return defaultSlugs()
@@ -253,42 +261,81 @@ export async function discoverPass({ enqueueNew = true } = {}) {
       discoveredCount: discoveredSlugs.length,
     })
 
-    // Seed shells for collections we have never seen (fast discover page coverage)
     let seeded = 0
+    let refreshed = 0
+    let queuedMeta = 0
+    // Cap how many brand-new shells jump the queue (keep HTTP healthy)
+    const maxFrontQueue = Number(process.env.DISCOVER_FRONT_QUEUE || 40)
+    let frontQueued = 0
+
     for (const r of rows) {
-      if (getCollection(r.slug)) continue
-      putCollection(r.slug, {
-        slug: r.slug,
-        collectionId: `os-${r.slug}`,
-        name: r.name,
-        image: r.image,
-        banner: r.banner,
-        description: r.description || `${r.name} on Robinhood Chain`,
-        contractAddress: r.contractAddress,
-        chain: r.chain || 'robinhood',
-        floorPrice: 0,
-        volume24h: 0,
-        volumeTotal: 0,
-        owners: 0,
-        items: r.items || 0,
-        listedCount: 0,
-        listedPct: 0,
-        nfts: [],
-        activities: [],
-        offers: [],
-        prices: [],
+      // Shell peek only — never load every NFT book during discover
+      const prev = peekCollection(r.slug)
+      if (!prev) {
+        // Brand-new OpenSea RH collection → shell on marketplace immediately
+        putCollection(r.slug, {
+          slug: r.slug,
+          collectionId: `os-${r.slug}`,
+          name: r.name,
+          image: r.image,
+          banner: r.banner,
+          description: r.description || `${r.name} on Robinhood Chain`,
+          contractAddress: r.contractAddress,
+          chain: r.chain || 'robinhood',
+          floorPrice: 0,
+          volume24h: 0,
+          volumeTotal: 0,
+          owners: 0,
+          items: r.items || 0,
+          listedCount: 0,
+          listedPct: 0,
+          nfts: [],
+          activities: [],
+          offers: [],
+          prices: [],
+          source: 'opensea',
+          syncedAt: new Date().toISOString(),
+          indexPhase: 'discovered',
+        })
+        seeded++
+        if (enqueueNew && frontQueued < maxFrontQueue) {
+          enqueueSync(r.slug, { full: false, front: true })
+          frontQueued++
+          queuedMeta++
+        } else if (enqueueNew) {
+          enqueueSync(r.slug, { full: false, front: false })
+          queuedMeta++
+        }
+        continue
+      }
+
+      // Refresh shell card (name/art/supply) without wiping NFT inventory
+      patchCollectionMeta(r.slug, {
+        name: r.name || prev.name,
+        image: r.image || prev.image,
+        banner: r.banner || prev.banner || prev.image,
+        description: r.description || prev.description,
+        contractAddress: r.contractAddress || prev.contractAddress,
+        chain: r.chain || prev.chain || 'robinhood',
+        items: r.items || prev.items || 0,
         source: 'opensea',
-        syncedAt: new Date().toISOString(),
-        indexPhase: 'discovered',
       })
-      seeded++
-      if (enqueueNew) {
-        const isPriority = PRIORITY_SLUGS.includes(r.slug)
-        enqueueSync(r.slug, { full: false, front: isPriority })
+      refreshed++
+
+      // Re-pull meta for shells that never got listings yet (stuck at discovered)
+      const needsMeta =
+        !prev.listedCount &&
+        (prev.indexPhase === 'discovered' ||
+          prev.indexPhase === 'meta-empty-book' ||
+          !prev.floorPrice)
+      if (enqueueNew && needsMeta && frontQueued < maxFrontQueue) {
+        enqueueSync(r.slug, { full: false, front: true })
+        frontQueued++
+        queuedMeta++
       }
     }
     console.log(
-      `[discover] ${discoveredSlugs.length} RH collections, seeded ${seeded} new shells (enqueueNew=${enqueueNew})`
+      `[discover] ${discoveredSlugs.length} RH · new=${seeded} refreshed=${refreshed} metaQueued=${queuedMeta} (front=${frontQueued})`
     )
     return discoveredSlugs
   } catch (e) {

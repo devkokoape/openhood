@@ -884,21 +884,35 @@ export function dbListPublicCollections({ readyOnly = true, limit = 80 } = {}) {
     syncedAt: r.synced_at || null,
   })
 
+  // Include:
+  //  - active secondary markets (listed_count > 0)
+  //  - newly launched / minting collections (items/supply > 0)
+  //  - any with 24h volume or floor (hyped even if thin book)
+  // Exclude empty dead shells with no signal.
   const rows = getDb()
     .prepare(
       `SELECT slug, collection_id, name, image, banner, description,
               contract_address, chain, floor_price, volume_24h, volume_total,
               owners, items, listed_count, listed_pct, source, synced_at
        FROM collections
-       WHERE listed_count > 0
-         AND (chain IS NULL OR chain = '' OR lower(chain) = 'robinhood')
-       ORDER BY volume_total DESC, volume_24h DESC, listed_count DESC
-       LIMIT 500`
+       WHERE (chain IS NULL OR chain = '' OR lower(chain) = 'robinhood')
+         AND (
+           listed_count > 0
+           OR volume_24h > 0
+           OR volume_total > 0
+           OR floor_price > 0
+           OR (items > 0 AND image IS NOT NULL AND image != '' AND image NOT LIKE '%dicebear%')
+         )
+       ORDER BY
+         volume_24h DESC,
+         volume_total DESC,
+         listed_count DESC,
+         items DESC
+       LIMIT 800`
     )
     .all()
 
-  // Public Discover: listed RH collection shells (collections table only).
-  // Do NOT run NFT GROUP BY here — it locks SQLite on large DBs and freezes HTTP.
+  // Public Discover: collection shells only (no NFT book load).
   const out = rows.slice(0, lim).map(mapRow)
   return {
     collections: out,

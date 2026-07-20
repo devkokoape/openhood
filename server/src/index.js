@@ -791,10 +791,18 @@ async function main() {
     void warmPriority().catch((e) => console.error('[warm]', e))
   }, warmDelay)
 
-  // Re-discover RH collections periodically (new drops appear automatically)
+  // Re-discover RH collections often so new hyped launches appear quickly
+  const discoverMs = Number(process.env.DISCOVER_INTERVAL_MS || 8 * 60_000)
+  setTimeout(() => {
+    void discoverPass({ enqueueNew: true }).catch((e) =>
+      console.error('[discover-boot]', e)
+    )
+  }, 20_000)
   setInterval(() => {
-    void discoverPass().catch((e) => console.error('[discover-loop]', e))
-  }, Number(process.env.DISCOVER_INTERVAL_MS || 15 * 60_000))
+    void discoverPass({ enqueueNew: true }).catch((e) =>
+      console.error('[discover-loop]', e)
+    )
+  }, discoverMs)
 
   // Queue-based sync (1–few jobs per tick — does not block /v1/home)
   setInterval(() => {

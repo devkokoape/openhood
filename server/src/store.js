@@ -115,8 +115,47 @@ export function setMeta(patch) {
   }
 }
 
+/**
+ * Update collection shell fields without touching NFT rows.
+ * Safe for discover/meta refresh so we never wipe listings by accident.
+ */
+export function patchCollectionMeta(slug, patch) {
+  const prev =
+    collectionCache.get(slug) ||
+    dbGetCollection(slug, { includeNfts: false }) || {
+      slug,
+      collectionId: `os-${slug}`,
+      nfts: [],
+    }
+  const next = {
+    ...prev,
+    ...patch,
+    slug,
+    collectionId: patch.collectionId || prev.collectionId || `os-${slug}`,
+    updatedAt: new Date().toISOString(),
+    // never pass empty nfts into replace from meta-only path
+    nfts: undefined,
+  }
+  dbUpsertCollection({
+    ...next,
+    nfts: [], // column write only; dbUpsertCollection doesn't touch nfts table
+  })
+  collectionCache.set(slug, {
+    ...prev,
+    ...patch,
+    slug,
+    collectionId: next.collectionId,
+    nfts: prev.nfts || [],
+  })
+  return collectionCache.get(slug)
+}
+
 export function putCollection(slug, row) {
   const prev = getCollection(slug)
+  // Meta-only update (no nfts key) — do not wipe NFT inventory
+  if (!Object.prototype.hasOwnProperty.call(row || {}, 'nfts')) {
+    return patchCollectionMeta(slug, row || {})
+  }
   let nfts = row.nfts || []
   // Prefer previous enrich when re-sync thins images
   if (prev?.nfts?.length && nfts.length) {
@@ -189,6 +228,14 @@ export function patchCollectionNfts(slug, patchesByToken) {
     invalidateReadySlugCache()
   }
   return getCollection(slug)
+}
+
+/** Shell only (no NFT load) — for discover / ranking loops */
+export function peekCollection(slug) {
+  if (collectionCache.has(slug)) return collectionCache.get(slug)
+  const row = dbGetCollection(slug, { includeNfts: false })
+  if (row) collectionCache.set(slug, { ...row, nfts: [] })
+  return row || null
 }
 
 export function getCollection(slug) {
