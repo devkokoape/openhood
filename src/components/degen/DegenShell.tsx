@@ -1,6 +1,10 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { Flame, Rocket, ShoppingCart, Zap } from 'lucide-react'
+import { Rocket, ShoppingCart } from 'lucide-react'
 import clsx from 'clsx'
+import {
+  AnimatedFlame,
+  AnimatedZap,
+} from '../ui/AnimatedIcons'
 
 export function DegenShell() {
   const { pathname } = useLocation()
@@ -9,20 +13,20 @@ export function DegenShell() {
     {
       to: '/degen',
       label: 'Overview',
-      icon: Flame,
       active: pathname === '/degen',
+      icon: 'flame' as const,
     },
     {
       to: '/degen/mints',
       label: 'Mint pages',
-      icon: Rocket,
       active: pathname.startsWith('/degen/mint'),
+      icon: 'rocket' as const,
     },
     {
       to: '/degen/bulk',
       label: 'Bulk buy',
-      icon: ShoppingCart,
       active: pathname.startsWith('/degen/bulk'),
+      icon: 'cart' as const,
     },
   ]
 
@@ -34,7 +38,7 @@ export function DegenShell() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="w-11 h-11 rounded-xl bg-hood flex items-center justify-center shrink-0 shadow-lg shadow-hood/25">
-                <Zap className="w-5 h-5 text-[#0b0e11]" strokeWidth={2.5} />
+                <AnimatedZap className="text-[#0b0e11]" size="lg" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -53,25 +57,26 @@ export function DegenShell() {
           </div>
 
           <nav className="mt-4 flex gap-1 overflow-x-auto hide-scrollbar">
-            {tabs.map((t) => {
-              const Icon = t.icon
-              return (
-                <NavLink
-                  key={t.to}
-                  to={t.to}
-                  end
-                  className={clsx(
-                    'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors',
-                    t.active
-                      ? 'bg-hood text-[#0b0e11]'
-                      : 'text-ink-2 hover:text-ink hover:bg-surface'
-                  )}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  {t.label}
-                </NavLink>
-              )
-            })}
+            {tabs.map((t) => (
+              <NavLink
+                key={t.to}
+                to={t.to}
+                end
+                className={clsx(
+                  'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors',
+                  t.active
+                    ? 'bg-hood text-[#0b0e11]'
+                    : 'text-ink-2 hover:text-ink hover:bg-surface'
+                )}
+              >
+                {t.icon === 'flame' && (
+                  <AnimatedFlame size="sm" className={t.active ? 'text-[#0b0e11]' : 'text-hood'} />
+                )}
+                {t.icon === 'rocket' && <Rocket className="w-3.5 h-3.5" />}
+                {t.icon === 'cart' && <ShoppingCart className="w-3.5 h-3.5" />}
+                {t.label}
+              </NavLink>
+            ))}
           </nav>
         </div>
       </div>

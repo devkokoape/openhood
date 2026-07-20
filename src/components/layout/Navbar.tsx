@@ -10,21 +10,36 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ComponentType } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../../context/ThemeContext'
 import { ConnectWallet } from '../wallet/ConnectWallet'
 import { NetworkBadge } from '../wallet/NetworkBadge'
 import {
+  AnimatedActivity,
+  AnimatedCompass,
+  AnimatedLayers,
+  AnimatedZap,
+} from '../ui/AnimatedIcons'
+import {
   isAdminAuthenticated,
   onAdminAuthChange,
 } from '../../lib/adminAuth'
 
-const publicLinks = [
-  { to: '/', label: 'Discover', end: true, icon: Layers },
+type NavIcon = ComponentType<{ className?: string }>
+type MotionIcon = ComponentType<{ className?: string; size?: 'sm' | 'md' | 'lg' }>
+
+const publicLinks: {
+  to: string
+  label: string
+  end: boolean
+  icon: NavIcon
+  AnimatedIcon?: MotionIcon
+}[] = [
+  { to: '/', label: 'Discover', end: true, icon: Layers, AnimatedIcon: AnimatedCompass },
   { to: '/collections', label: 'Collections', end: false, icon: Layers },
-  { to: '/degen', label: 'Degen', end: false, icon: Zap },
-  { to: '/activity', label: 'Activity', end: false, icon: Activity },
+  { to: '/degen', label: 'Degen', end: false, icon: Zap, AnimatedIcon: AnimatedZap },
+  { to: '/activity', label: 'Activity', end: false, icon: Activity, AnimatedIcon: AnimatedActivity },
 ]
 
 export function Navbar() {
@@ -39,7 +54,7 @@ export function Navbar() {
     return onAdminAuthChange(() => setIsAdmin(isAdminAuthenticated()))
   }, [])
 
-  const links = isAdmin
+  const links: typeof publicLinks = isAdmin
     ? [
         ...publicLinks,
         { to: '/admin', label: 'Admin', end: false, icon: Activity },
@@ -68,7 +83,7 @@ export function Navbar() {
       <div className="mx-auto max-w-[1920px] px-2 sm:px-3 lg:px-4 h-14 flex items-center gap-2 sm:gap-3 min-w-0">
         <Link to="/" className="flex items-center gap-1.5 sm:gap-2 shrink-0 group min-w-0">
           <div className="w-8 h-8 sm:w-7 sm:h-7 rounded-lg bg-hood flex items-center justify-center shadow-sm shadow-hood/30 shrink-0">
-            <Layers className="w-3.5 h-3.5 text-[#0b0e11]" strokeWidth={2.5} />
+            <AnimatedLayers className="text-[#0b0e11]" size="sm" />
           </div>
           <span className="font-bold text-sm sm:text-base tracking-tight text-ink group-hover:text-hood transition-colors truncate">
             Open<span className="text-hood">Hood</span>
@@ -175,6 +190,7 @@ export function Navbar() {
 
               {links.map((l) => {
                 const Icon = l.icon
+                const Motion = l.AnimatedIcon
                 return (
                   <Link
                     key={l.to}
@@ -182,7 +198,11 @@ export function Navbar() {
                     onClick={() => setOpen(false)}
                     className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-surface-3"
                   >
-                    <Icon className="w-4 h-4 shrink-0 text-hood" />
+                    {Motion ? (
+                      <Motion className="shrink-0 text-hood" size="md" />
+                    ) : (
+                      <Icon className="w-4 h-4 shrink-0 text-hood" />
+                    )}
                     {l.to === '/degen' ? 'Degen Mode' : l.label}
                   </Link>
                 )

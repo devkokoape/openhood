@@ -1,5 +1,6 @@
-import { Layers, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { AnimatedLayers } from '../ui/AnimatedIcons'
 import { OPENSEA_DOCS } from '../../lib/opensea'
 import { MARKETPLACE_EXPLORER } from '../../lib/marketplace'
 
@@ -48,7 +49,7 @@ export function Footer() {
             <div className="col-span-2 sm:col-span-4 lg:col-span-4">
               <Link to="/" className="inline-flex items-center gap-2.5 group">
                 <div className="w-9 h-9 rounded-xl bg-hood flex items-center justify-center shadow-md shadow-hood/20">
-                  <Layers className="w-4 h-4 text-[#0b0e11]" strokeWidth={2.5} />
+                  <AnimatedLayers className="text-[#0b0e11]" size="md" />
                 </div>
                 <div>
                   <div className="font-extrabold text-lg tracking-tight text-ink group-hover:text-hood transition-colors">

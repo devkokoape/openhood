@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BadgeCheck, ChevronLeft, ChevronRight, ShoppingBag, Sparkles } from 'lucide-react'
+import { BadgeCheck, ChevronLeft, ChevronRight, ShoppingBag } from 'lucide-react'
+import { AnimatedSparkles } from '../ui/AnimatedIcons'
 import type { Collection } from '../../types'
 import { formatPrice } from '../../data/mockData'
 import { Button } from '../ui/Button'
@@ -76,7 +77,7 @@ export function FeaturedHero({ collections }: { collections: Collection[] }) {
           <div className="flex items-end justify-between gap-3">
             <div className="min-w-0 max-w-2xl w-full">
               <div className="inline-flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-white text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider mb-2 sm:mb-3">
-                <Sparkles className="w-3 h-3 text-hood" />
+                <AnimatedSparkles className="text-hood" size="sm" />
                 Discover
               </div>
 

@@ -283,9 +283,689 @@ a,
   --color-on-hood: #0b0e11;
 }
 
+
+/* Notable panel — continuous brand stage (no empty gap) */
+.notable-panel {
+  position: relative;
+  background: var(--color-surface-2);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-hood) 12%, transparent);
+}
+.notable-panel-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 55% 90% at 8% 50%, rgba(0, 200, 5, 0.16), transparent 58%),
+    radial-gradient(ellipse 40% 70% at 92% 40%, rgba(0, 200, 5, 0.06), transparent 55%),
+    linear-gradient(
+      105deg,
+      color-mix(in srgb, var(--color-surface-2) 70%, #00c805 8%) 0%,
+      var(--color-surface-2) 38%,
+      var(--color-surface) 100%
+    );
+}
+.dark .notable-panel-wash {
+  background:
+    radial-gradient(ellipse 50% 85% at 6% 50%, rgba(0, 200, 5, 0.14), transparent 55%),
+    radial-gradient(ellipse 45% 70% at 95% 45%, rgba(0, 200, 5, 0.05), transparent 50%),
+    linear-gradient(105deg, #0e1510 0%, #0b0e11 42%, #12161a 100%);
+}
+.notable-panel-inner {
+  min-height: 0;
+}
+.notable-panel-copy {
+  /* no hard column border — flows into bridge */
+  background: transparent;
+}
+
+/* Bridge: creative connector between copy and cards */
+.notable-bridge {
+  position: relative;
+  width: 5.75rem;
+}
+.notable-bridge-rail {
+  position: absolute;
+  top: 12%;
+  bottom: 12%;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--color-hood) 55%, transparent) 20%,
+    color-mix(in srgb, var(--color-hood) 55%, transparent) 80%,
+    transparent
+  );
+  opacity: 0.7;
+}
+.notable-bridge-rail::before,
+.notable-bridge-rail::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--color-hood);
+  transform: translateX(-50%);
+  box-shadow: 0 0 10px rgba(0, 200, 5, 0.45);
+}
+.notable-bridge-rail::before {
+  top: 0;
+}
+.notable-bridge-rail::after {
+  bottom: 0;
+}
+.notable-bridge-core {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem 0.35rem;
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-hood) 22%, var(--color-border));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(8px);
+}
+.dark .notable-bridge-core {
+  background: color-mix(in srgb, var(--color-surface-2) 82%, transparent);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.35);
+}
+.notable-bridge-avatars {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: center;
+}
+.notable-bridge-avatar {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 9999px;
+  object-fit: cover;
+  border: 2px solid var(--color-surface);
+  background: var(--color-surface-3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.notable-bridge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #0b0e11;
+  background: linear-gradient(135deg, #00c805, #7dff80);
+  box-shadow: 0 4px 14px rgba(0, 200, 5, 0.3);
+}
+.notable-bridge-pill-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: #0b0e11;
+  animation: notableBridgePulse 1.8s ease-in-out infinite;
+}
+.notable-bridge-caption {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+@keyframes notableBridgePulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notable-bridge-pill-dot {
+    animation: none;
+  }
+}
+
+.notable-panel-stage {
+  background: transparent;
+  min-width: 0;
+}
+/* Exactly 4 equal cards filling the stage (RTL start) */
+.notable-panel-cards-four {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  width: 100%;
+  align-items: stretch;
+  direction: rtl;
+}
+.notable-panel-cards-four .notable-panel-card-slot {
+  direction: ltr;
+  min-width: 0;
+}
+.notable-panel-cards-four .notable-card {
+  width: 100%;
+  max-width: none;
+}
+@media (max-width: 1023px) {
+  .notable-panel-cards-four {
+    direction: ltr;
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 0.65rem;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .notable-panel-cards-four::-webkit-scrollbar {
+    display: none;
+  }
+  .notable-panel-cards-four .notable-panel-card-slot {
+    flex: 0 0 min(220px, 78vw);
+    scroll-snap-align: start;
+  }
+}
+.notable-panel-stage .notable-card {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+.dark .notable-panel-stage .notable-card {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Notable collection cards */
+.notable-card {
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-hood) 12%, transparent);
+}
+.notable-card-overlay {
+  background: linear-gradient(
+    180deg,
+    transparent 20%,
+    color-mix(in srgb, var(--color-surface) 55%, transparent) 70%,
+    var(--color-surface) 100%
+  );
+}
+.notable-card-ribbon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.65rem 0.65rem 0 0;
+  padding: 0.3rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #0b0e11;
+  background: linear-gradient(135deg, #00c805, #7dff80);
+  box-shadow: 0 4px 14px rgba(0, 200, 5, 0.35);
+}
+.notable-card-ribbon-sm {
+  margin: 0.45rem 0.45rem 0 0;
+  padding: 0.22rem 0.45rem;
+  font-size: 9px;
+  gap: 0.2rem;
+}
+.notable-ledger-sm {
+  padding: 0.65rem 0.7rem 0.6rem;
+  border-radius: 0.85rem;
+}
+.notable-ledger-sm .notable-ledger-total span:first-child {
+  font-size: 1.35rem;
+}
+.notable-ledger-sm .notable-ledger-num {
+  font-size: 0.8rem;
+}
+.notable-ledger-sm .notable-ledger-spectrum {
+  margin: 0.5rem 0 0.65rem;
+}
+/* Unified volume ledger — one panel, numbers-first feet */
+.notable-ledger {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  padding: 0.85rem 0.9rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-hood) 22%, var(--color-border));
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--color-hood) 16%, var(--color-surface)) 0%,
+    var(--color-surface-2) 48%,
+    var(--color-surface) 100%
+  );
+}
+.notable-ledger-glow {
+  position: absolute;
+  width: 8rem;
+  height: 8rem;
+  right: -2rem;
+  top: -3rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(0, 200, 5, 0.22), transparent 68%);
+  pointer-events: none;
+}
+.notable-ledger-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-hood) 85%, var(--color-ink-3));
+}
+.notable-ledger-total {
+  margin-top: 0.15rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+.notable-ledger-total span:first-child {
+  font-size: 1.65rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--color-ink);
+}
+.notable-ledger-eth {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--color-hood);
+}
+.notable-ledger-spectrum {
+  position: relative;
+  margin: 0.7rem 0 0.85rem;
+  height: 3px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-surface-3) 90%, transparent);
+  overflow: hidden;
+}
+.notable-ledger-spectrum-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #00a804, #00c805, #9dff9f);
+  box-shadow: 0 0 10px rgba(0, 200, 5, 0.4);
+}
+.notable-ledger-feet {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.35rem;
+}
+.notable-ledger-foot {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.notable-ledger-foot-mid {
+  padding-inline: 0.35rem;
+  border-inline: 1px dashed color-mix(in srgb, var(--color-hood) 22%, var(--color-border));
+}
+.notable-ledger-num {
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--color-ink);
+}
+.notable-ledger-cap {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+.notable-ledger-cap em {
+  font-style: normal;
+  color: var(--color-hood);
+  font-weight: 800;
+  margin-left: 0.15rem;
+}
+
+/*
+ * Card view: banner bg with dark fade right → left
+ * (heavy dark on left for text, slight art peek on the right)
+ */
+.trending-card-bg-fade {
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--color-surface) 35%, transparent) 0%,
+    color-mix(in srgb, var(--color-surface) 55%, transparent) 12%,
+    color-mix(in srgb, var(--color-surface) 82%, transparent) 32%,
+    color-mix(in srgb, var(--color-surface) 94%, transparent) 52%,
+    color-mix(in srgb, var(--color-surface) 98%, transparent) 78%,
+    var(--color-surface) 100%
+  );
+}
+.dark .trending-card-bg-fade {
+  background: linear-gradient(
+    to left,
+    rgba(11, 14, 17, 0.45) 0%,
+    rgba(11, 14, 17, 0.65) 12%,
+    rgba(11, 14, 17, 0.85) 32%,
+    rgba(11, 14, 17, 0.94) 55%,
+    rgba(11, 14, 17, 0.98) 80%,
+    #0b0e11 100%
+  );
+}
+
+/* ── Trending panel: locked height (list ↔ cards never reflows page) ── */
+.trending-panel {
+  width: 100%;
+}
+.trending-view-shell {
+  height: 36rem; /* fixed — do not use min/max only */
+  max-height: 36rem;
+  min-height: 36rem;
+  overflow-x: hidden;
+  overflow-y: scroll; /* always scrollable in list + card mode */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  border-radius: 0.75rem;
+  scrollbar-gutter: stable;
+  position: relative;
+}
+.trending-view-shell > * {
+  /* allow content to define scroll height */
+  min-height: min-content;
+}
+@media (max-width: 1023px) {
+  .trending-view-shell {
+    height: 30rem;
+    max-height: 30rem;
+    min-height: 30rem;
+  }
+}
+
+/* Degen promo card — bulk mint / buy */
+.degen-promo {
+  position: relative;
+  isolation: isolate;
+}
+.degen-promo-mesh {
+  background:
+    radial-gradient(ellipse 90% 70% at 20% 100%, rgba(0, 200, 5, 0.28), transparent 55%),
+    radial-gradient(ellipse 70% 60% at 100% 0%, rgba(255, 80, 0, 0.18), transparent 50%),
+    radial-gradient(ellipse 50% 40% at 50% 50%, rgba(0, 200, 5, 0.08), transparent 60%);
+  animation: degenMeshPulse 6s ease-in-out infinite;
+}
+.degen-promo-grid {
+  background-image:
+    linear-gradient(rgba(0, 200, 5, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 200, 5, 0.07) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(180deg, transparent, #000 30%, #000 80%, transparent);
+  opacity: 0.5;
+}
+.degen-promo-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(28px);
+  pointer-events: none;
+  animation: degenOrb 8s ease-in-out infinite;
+}
+.degen-promo-orb-a {
+  width: 9rem;
+  height: 9rem;
+  background: rgba(0, 200, 5, 0.35);
+  bottom: -2rem;
+  left: -2rem;
+}
+.degen-promo-orb-b {
+  width: 7rem;
+  height: 7rem;
+  background: rgba(255, 80, 0, 0.22);
+  top: -1.5rem;
+  right: -1rem;
+  animation-delay: -3s;
+}
+.degen-promo-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(0, 200, 5, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 100% 220%;
+  animation: degenScan 4.5s linear infinite;
+  opacity: 0.7;
+}
+@keyframes degenMeshPulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes degenOrb {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(10px, -12px) scale(1.12);
+  }
+}
+@keyframes degenScan {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 0% 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .degen-promo-mesh,
+  .degen-promo-orb,
+  .degen-promo-scan {
+    animation: none;
+  }
+}
+.trending-view-controls {
+  height: 2rem;
+  min-height: 2rem;
+  max-height: 2rem;
+}
+/*
+ * Degen sits beside the fixed table shell (not the section title).
+ * height = shell 36rem + mt-2.5 (0.625rem) + controls 2rem
+ * margin-top = title row (2.25rem) + mb-3 (0.75rem)
+ */
+.trending-degen-aside {
+  height: calc(36rem + 0.625rem + 2rem);
+  min-height: calc(36rem + 0.625rem + 2rem);
+  max-height: calc(36rem + 0.625rem + 2rem);
+  margin-top: calc(2.25rem + 0.75rem);
+}
+@media (max-width: 1023px) {
+  .trending-degen-aside {
+    height: auto;
+    min-height: 14rem;
+    max-height: none;
+    margin-top: 0;
+  }
+}
+
+/* ── Trending suggestion rows (not hovered / hovered mocks) ── */
+.trending-suggestion-cols {
+  /* wider collection column so marquee runs up to Floor */
+  grid-template-columns:
+    minmax(0, 2.75fr)
+    minmax(5rem, 0.65fr)
+    minmax(5rem, 0.75fr)
+    minmax(4.5rem, 0.65fr)
+    minmax(6rem, 0.8fr);
+}
+
+/* Default — not hovered.png */
+.trending-row-not-hovered {
+  background: transparent;
+}
+
+/* Hovered row — subtle dark lift only (mock hovered.png) */
+.trending-row-not-hovered:hover,
+.trending-row-not-hovered:focus-visible {
+  background: color-mix(in srgb, var(--color-surface-2) 92%, #000 8%);
+}
+.dark .trending-row-not-hovered:hover,
+.dark .trending-row-not-hovered:focus-visible {
+  background: color-mix(in srgb, var(--color-surface-2) 75%, #000 25%);
+}
+
+/*
+ * Collection marquee: B/W strip scrolls RTL toward the name,
+ * fading out as it reaches the collection name; still reaches near Floor.
+ */
+.trending-marquee {
+  position: absolute;
+  /* after avatar; extend right up against Floor column */
+  left: 3.5rem;
+  right: -2.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 2.85rem;
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  pointer-events: none;
+  /*
+   * Fade OUT at the name (left), stay solid almost to Floor,
+   * only a short dissolve at the far right edge.
+   */
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 6%,
+    rgba(0, 0, 0, 0.12) 14%,
+    rgba(0, 0, 0, 0.5) 26%,
+    #000 40%,
+    #000 92%,
+    rgba(0, 0, 0, 0.4) 97%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 6%,
+    rgba(0, 0, 0, 0.12) 14%,
+    rgba(0, 0, 0, 0.5) 26%,
+    #000 40%,
+    #000 92%,
+    rgba(0, 0, 0, 0.4) 97%,
+    transparent 100%
+  );
+}
+.trending-row-not-hovered:hover .trending-marquee,
+.trending-row-not-hovered:focus-visible .trending-marquee {
+  opacity: 1;
+}
+.trending-marquee-track {
+  display: flex;
+  height: 100%;
+  width: max-content;
+  align-items: center;
+  will-change: transform;
+}
+.trending-row-not-hovered:hover .trending-marquee-track,
+.trending-row-not-hovered:focus-visible .trending-marquee-track {
+  /* very slow RTL drift */
+  animation: trendingMarqueeRtl 90s linear infinite;
+}
+.trending-marquee-seq {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 100%;
+  padding-inline: 0.25rem;
+}
+.trending-marquee-tile {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  background: var(--color-surface-3);
+  opacity: 0.58;
+}
+.trending-marquee-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: grayscale(1) brightness(0.76) contrast(0.98);
+}
+/*
+ * Extra dark wash at the name (left) so tiles dissolve as they arrive,
+ * plus a soft dissolve into the Floor column (right).
+ */
+.trending-marquee-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 0%,
+    color-mix(in srgb, var(--color-surface) 85%, transparent) 12%,
+    color-mix(in srgb, var(--color-surface) 30%, transparent) 24%,
+    transparent 38%,
+    transparent 90%,
+    color-mix(in srgb, var(--color-surface) 45%, transparent) 96%,
+    var(--color-surface) 100%
+  );
+}
+.dark .trending-marquee-fade {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 0%,
+    rgba(11, 14, 17, 0.9) 10%,
+    rgba(11, 14, 17, 0.35) 22%,
+    transparent 38%,
+    transparent 88%,
+    rgba(11, 14, 17, 0.4) 95%,
+    rgba(11, 14, 17, 0.98) 100%
+  );
+}
+.dark .trending-marquee-tile img {
+  filter: grayscale(1) brightness(0.58) contrast(0.95);
+}
+/* Keep name crisp over the dissolving strip */
+.trending-row-name {
+  position: relative;
+  z-index: 2;
+  text-shadow: 0 0 12px var(--color-surface), 0 0 4px var(--color-surface);
+}
+.dark .trending-row-name {
+  text-shadow: 0 0 14px rgba(11, 14, 17, 0.95), 0 0 6px rgba(11, 14, 17, 0.9);
+}
+@keyframes trendingMarqueeRtl {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trending-row-not-hovered:hover .trending-marquee-track,
+  .trending-row-not-hovered:focus-visible .trending-marquee-track {
+    animation: none;
+  }
+}
+
 /* Marketplace-tier horizontal rail (Discover, Notable, etc.) */
 .market-rail {
   display: flex;
+  align-items: stretch;
   gap: 0.75rem;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
@@ -370,4 +1050,178 @@ a,
   .market-rail {
     scroll-behavior: auto;
   }
+  .icon-compass,
+  .icon-flame,
+  .icon-zap,
+  .icon-trophy,
+  .icon-layers,
+  .icon-sparkles,
+  .icon-activity {
+    animation: none !important;
+  }
+}
+
+/* ── Animated icons (marketplace polish) ── */
+.icon-compass,
+.icon-flame,
+.icon-zap,
+.icon-trophy,
+.icon-layers,
+.icon-sparkles,
+.icon-activity {
+  transform-origin: center center;
+  will-change: transform, opacity, filter;
+}
+
+/* Discover — slow compass sweep */
+.icon-compass {
+  animation: iconCompass 6s ease-in-out infinite;
+}
+@keyframes iconCompass {
+  0%,
+  100% {
+    transform: rotate(-18deg);
+  }
+  50% {
+    transform: rotate(22deg);
+  }
+}
+
+/* Trending — flame flicker + lift */
+.icon-flame {
+  animation: iconFlame 1.6s ease-in-out infinite;
+}
+@keyframes iconFlame {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  35% {
+    transform: translateY(-1px) scale(1.06) rotate(-3deg);
+    opacity: 0.92;
+    filter: drop-shadow(0 0 4px rgba(0, 200, 5, 0.35));
+  }
+  70% {
+    transform: translateY(-0.5px) scale(1.03) rotate(2deg);
+    opacity: 1;
+  }
+}
+
+/* Degen — electric zap pulse */
+.icon-zap {
+  animation: iconZap 1.8s ease-in-out infinite;
+}
+@keyframes iconZap {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  12% {
+    transform: scale(1.12) rotate(-6deg);
+    filter: drop-shadow(0 0 6px rgba(0, 200, 5, 0.55));
+  }
+  24% {
+    transform: scale(0.96) rotate(3deg);
+  }
+  40% {
+    transform: scale(1.06) rotate(-2deg);
+    filter: drop-shadow(0 0 4px rgba(0, 200, 5, 0.35));
+  }
+  55%,
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* Notable — trophy soft bob + gleam */
+.icon-trophy {
+  animation: iconTrophy 2.8s ease-in-out infinite;
+}
+@keyframes iconTrophy {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+    filter: brightness(1);
+  }
+  40% {
+    transform: translateY(-1.5px) rotate(-4deg);
+    filter: brightness(1.08);
+  }
+  70% {
+    transform: translateY(-0.5px) rotate(3deg);
+    filter: brightness(1.12);
+  }
+}
+
+/* Brand layers — gentle stack breathe */
+.icon-layers {
+  animation: iconLayers 3.2s ease-in-out infinite;
+}
+@keyframes iconLayers {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-1px) scale(1.05);
+  }
+}
+
+/* Sparkles — twinkle */
+.icon-sparkles {
+  animation: iconSparkles 2.2s ease-in-out infinite;
+}
+@keyframes iconSparkles {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1.1) rotate(8deg);
+    opacity: 0.85;
+  }
+  70% {
+    transform: scale(0.96) rotate(-4deg);
+    opacity: 1;
+  }
+}
+
+/* Activity — live pulse */
+.icon-activity {
+  animation: iconActivity 2s ease-in-out infinite;
+}
+@keyframes iconActivity {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scaleX(1.08);
+    opacity: 0.85;
+  }
+}
+
+/* Badge hover: slightly faster / punchier */
+.icon-badge:hover .icon-compass {
+  animation-duration: 2.5s;
+}
+.icon-badge:hover .icon-flame {
+  animation-duration: 0.9s;
+}
+.icon-badge:hover .icon-zap {
+  animation-duration: 1s;
+}
+.icon-badge:hover .icon-trophy {
+  animation-duration: 1.4s;
+}
+.icon-badge:hover .icon-layers {
+  animation-duration: 1.6s;
+}
+.icon-badge:hover .icon-sparkles {
+  animation-duration: 1.1s;
 }
